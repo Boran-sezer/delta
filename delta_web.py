@@ -8,6 +8,10 @@ import json
 # --- CONFIGURATION ---
 st.set_page_config(page_title="DELTA OS", page_icon="⚡", layout="wide")
 
+# --- ÉTATS DE SESSION ---
+if "messages" not in st.session_state: st.session_state.messages = []
+if "locked" not in st.session_state: st.session_state.locked = False
+
 # --- INITIALISATION FIREBASE ---
 if not firebase_admin._apps:
     try:
@@ -19,53 +23,52 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
+client = Groq(api_key="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")
 
-# --- ÉTATS DE SESSION ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# --- 🔒 LOGIQUE DE VERROUILLAGE ---
+if st.session_state.locked:
+    st.markdown("### 🔒 SYSTÈME VERROUILLÉ")
+    code_input = st.text_input("Entrez le code d'accès pour déverrouiller DELTA :", type="password")
+    
+    if st.button("Déverrouiller"):
+        if code_input == "20082008":
+            st.session_state.locked = False
+            st.success("✅ Accès accordé. Redémarrage...")
+            st.rerun()
+        else:
+            st.error("❌ Code incorrect. Accès refusé.")
+    st.stop() # Arrête l'affichage du reste de la page
 
-# --- LECTURE DE L'ENTRÉE (AVANT TOUT LE RESTE) ---
-# On récupère l'entrée pour vérifier l'ordre de réinitialisation AVANT d'afficher les archives
-if p := st.chat_input("Ordres, Monsieur ?"):
-    if p.lower().strip() == "réinitialisation complète":
-        # 1. Purge RÉELLE dans Firebase
-        doc_ref.set({"faits": [], "faits_verrouilles": []})
-        # 2. Vide l'historique de discussion
-        st.session_state.messages = []
-        # 3. RELANCE TOUT pour vider l'affichage
-        st.rerun()
-    else:
-        st.session_state.temp_prompt = p
-
-# --- CHARGEMENT MÉMOIRE (APRÈS VÉRIFICATION DE PURGE) ---
+# --- CHARGEMENT DONNÉES ---
 res = doc_ref.get()
 faits = res.to_dict().get("faits", []) if res.exists else []
 
-# --- SIDEBAR (ARCHIVES) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🧠 Archives")
-    if not faits:
-        st.write("Archives vides.")
     for f in faits:
         st.info(f)
 
 # --- CHAT ---
 st.title("⚡ DELTA OS")
+
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- TRAITEMENT DU MESSAGE SI PAS DE PURGE ---
-if "temp_prompt" in st.session_state:
-    prompt = st.session_state.temp_prompt
-    del st.session_state.temp_prompt
+if p := st.chat_input("Vos ordres, Monsieur ?"):
+    low_p = p.lower().strip()
     
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    # DÉTECTION DE L'ORDRE DE VERROUILLAGE
+    if "verrouille-toi" in low_p:
+        st.session_state.locked = True
+        st.rerun()
 
-    # APPEL IA
-    client = Groq(api_key="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")
+    st.session_state.messages.append({"role": "user", "content": p})
+    with st.chat_message("user"): st.markdown(p)
+
+    # RÉPONSE IA
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA. Voici les faits actuels : {faits}"
+        instr = f"Tu es DELTA, majordome de Monsieur Boran. Archives : {faits}"
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": instr}] + st.session_state.messages
