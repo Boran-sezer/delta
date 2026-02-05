@@ -22,8 +22,7 @@ doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
 # --- ÉTATS DE SESSION ---
-if "messages" not in st.session_state: 
-    st.session_state.messages = []
+if "messages" not in st.session_state: st.session_state.messages = []
 
 # --- CHARGEMENT DES ARCHIVES ---
 res = doc_ref.get()
@@ -52,31 +51,35 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 if p := st.chat_input("Quels sont vos ordres, Monsieur ?"):
+    low_p = p.lower().strip()
+    
+    # --- 🛠️ LOGIQUE D'ARCHIVAGE MANUELLE ---
+    # Si vous dites : "Archive : [votre info]"
+    if low_p.startswith("archive :") or low_p.startswith("mémorise :"):
+        nouvelle_info = p.split(":", 1)[1].strip()
+        faits.append(nouvelle_info)
+        doc_ref.update({"faits": faits})
+        st.success(f"✅ Info archivée : {nouvelle_info}")
+        # On ne passe pas par l'IA pour économiser du temps
+        st.session_state.messages.append({"role": "user", "content": p})
+        st.session_state.messages.append({"role": "assistant", "content": f"C'est fait Monsieur, j'ai ajouté '{nouvelle_info}' à vos archives. 🗄️"})
+        st.rerun()
+
+    # --- LOGIQUE NORMALE ---
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"): st.markdown(p)
 
     with st.chat_message("assistant"):
-        # --- 🛡️ INSTRUCTIONS D'IDENTITÉ RENFORCÉES ---
         instr = (
-            "Tu es DELTA, le majordome virtuel de Monsieur Boran. "
-            "IMPORTANT : Tu ne dois JAMAIS te faire passer pour Monsieur Boran. "
-            "Tu es une IA, il est ton maître. Réponds avec respect et efficacité. "
-            f"Voici tes archives actuelles sur lui : {faits}. "
-            "Utilise des émojis et sois bref."
+            "Tu es DELTA, le majordome de Monsieur Boran. "
+            f"Archives actuelles : {faits}. "
+            "Si Monsieur te donne une information importante, suggère-lui de l'archiver en commençant sa phrase par 'Archive :'."
         )
         
-        try:
-            # On force le rôle "system" pour bien séparer l'IA de l'utilisateur
-            messages_pour_ia = [{"role": "system", "content": instr}] + st.session_state.messages
-            
-            r = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages_pour_ia,
-                temperature=0.6 # Température légèrement baissée pour plus de cohérence
-            )
-            
-            rep = r.choices[0].message.content
-            st.markdown(rep)
-            st.session_state.messages.append({"role": "assistant", "content": rep})
-        except Exception as e:
-            st.error(f"Erreur système : {e}")
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": instr}] + st.session_state.messages
+        )
+        rep = r.choices[0].message.content
+        st.markdown(rep)
+        st.session_state.messages.append({"role": "assistant", "content": rep})
