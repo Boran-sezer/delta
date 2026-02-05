@@ -25,71 +25,112 @@ doc_profil = db.collection("memoire").document("profil_monsieur")
 # --- CONNEXION GROQ ---
 client = Groq(api_key="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")
 
-# --- CHARGEMENT DU PROFIL (MÉMOIRE LONGUE) ---
-# On ne charge plus le chat_history ici pour qu'il s'efface à la fermeture
+# --- ÉTATS DE SESSION POUR LES CODES ---
+if "code_action" not in st.session_state: st.session_state.code_action = None
+if "pending_info" not in st.session_state: st.session_state.pending_info = None
+
+# --- CHARGEMENT DU PROFIL ---
 res_profil = doc_profil.get()
-faits_connus = res_profil.to_dict().get("faits", []) if res_profil.exists else []
+data = res_profil.to_dict() if res_profil.exists else {}
+faits_publics = data.get("faits", [])
+faits_verrouilles = data.get("faits_verrouilles", [])
 
 # --- INTERFACE ---
 st.title("⚡ DELTA SYSTEM")
 
-# Initialisation de l'historique local uniquement (s'efface à la fermeture)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Sidebar pour voir ce que DELTA a jugé important
+# --- SIDEBAR & GESTION DES ARCHIVES ---
 with st.sidebar:
-    st.title("🧠 Archives")
-    st.write("Informations extraites automatiquement :")
-    for f in faits_connus:
-        st.info(f"🔹 {f}")
+    st.title("🧠 Archives & Sécurité")
+    
+    # Section Archives Publiques
+    st.subheader("Archives Standard")
+    for i, f in enumerate(faits_publics):
+        col1, col2 = st.columns([4, 1])
+        col1.info(f"🔹 {f}")
+        if col2.button("🗑️", key=f"del_pub_{i}"):
+            faits_publics.pop(i)
+            doc_profil.set({"faits": faits_publics, "faits_verrouilles": faits_verrouilles})
+            st.rerun()
 
-# Affichage des messages
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    # Section Archives Verrouillées
+    st.subheader("🔐 Archives Scellées")
+    if st.session_state.get("unlocked", False):
+        for i, f in enumerate(faits_verrouilles):
+            col1, col2 = st.columns([4, 1])
+            col1.warning(f"🔒 {f}")
+            if col2.button("🗑️", key=f"del_priv_{i}"):
+                faits_verrouilles.pop(i)
+                doc_profil.set({"faits": faits_publics, "faits_verrouilles": faits_verrouilles})
+                st.rerun()
+        if st.button("Reverrouiller"):
+            st.session_state.unlocked = False
+            st.rerun()
+    else:
+        st.write("Contenu masqué.")
 
-# --- LOGIQUE DE RÉPONSE ---
-if p := st.chat_input("Vos ordres, Monsieur ?"):
-    # 1. Ajouter au chat local
-    st.session_state.messages.append({"role": "user", "content": p})
-    with st.chat_message("user"):
-        st.markdown(p)
-
-    # 2. Réponse de DELTA avec tri intelligent
-    with st.chat_message("assistant"):
-        contexte_faits = "Infos importantes sur Monsieur Boran : " + ", ".join(faits_connus)
-        
-        # Instructions pour le tri des infos
-        instructions = {
-            "role": "system", 
-            "content": f"""Tu es DELTA, créé par Monsieur Boran. {contexte_faits}. 
-            Tu es son majordome fidèle. 
-            MISSION SPÉCIALE : Analyse chaque message de Monsieur. 
-            Si tu détectes une information importante (goûts, noms, codes, habitudes), 
-            réponds normalement MAIS commence ta réponse par le tag [MEMO: l'info à retenir] 
-            pour que je puisse l'extraire."""
-        }
-        
-        full_history = [instructions] + st.session_state.messages
-        
-        r = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", 
-            messages=full_history
-        )
-        rep_brute = r.choices[0].message.content
-        
-        # Traitement du tag de mémoire
-        if "[MEMO:" in rep_brute:
-            # On extrait l'info entre [MEMO: et ]
-            partie_memo = rep_brute.split("[MEMO:")[1].split("]")[0].strip()
-            if partie_memo not in faits_connus:
-                faits_connus.append(partie_memo)
-                doc_profil.set({"faits": faits_connus})
-            # On nettoie la réponse pour ne pas afficher le tag à Monsieur
-            rep_finale = rep_brute.split("]")[1].strip() if "]" in rep_brute else rep_brute
+# --- LOGIQUE DES CODES DE SÉCURITÉ ---
+if st.session_state.code_action:
+    code_input = st.text_input("🔑 Entrez le code d'autorisation (20082008) :", type="password")
+    if st.button("Confirmer l'identité"):
+        if code_input == "20082008":
+            if st.session_state.code_action == "reset_all":
+                doc_profil.set({"faits": [], "faits_verrouilles": []})
+                st.success("Réinitialisation totale accomplie, Monsieur.")
+            elif st.session_state.code_action == "reset_target":
+                target = st.session_state.pending_info
+                faits_publics = [f for f in faits_publics if target.lower() not in f.lower()]
+                faits_verrouilles = [f for f in faits_verrouilles if target.lower() not in f.lower()]
+                doc_profil.set({"faits": faits_publics, "faits_verrouilles": faits_verrouilles})
+                st.success(f"Cibles '{target}' éliminées des archives.")
+            elif st.session_state.code_action == "lock_info":
+                faits_verrouilles.append(st.session_state.pending_info)
+                doc_profil.set({"faits": faits_publics, "faits_verrouilles": faits_verrouilles})
+                st.success("Information scellée dans les archives verrouillées.")
+            elif st.session_state.code_action == "view_locked":
+                st.session_state.unlocked = True
+            
+            st.session_state.code_action = None
+            st.session_state.pending_info = None
+            st.rerun()
         else:
-            rep_finale = rep_brute
+            st.error("Code incorrect. Accès refusé.")
 
-        st.markdown(rep_finale)
-        st.session_state.messages.append({"role": "assistant", "content": rep_finale})
+# Affichage du chat
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]): st.markdown(m["content"])
+
+# --- ANALYSE DES ORDRES ---
+if p := st.chat_input("Vos ordres, Monsieur ?"):
+    st.session_state.messages.append({"role": "user", "content": p})
+    with st.chat_message("user"): st.markdown(p)
+
+    # Détection des commandes spéciales
+    low_p = p.lower()
+    if "réinitialisation complète" in low_p:
+        st.session_state.code_action = "reset_all"
+        response = "Demande reçue. Procédure de réinitialisation totale en attente du code de sécurité."
+    elif "supprime précisément" in low_p:
+        st.session_state.code_action = "reset_target"
+        st.session_state.pending_info = p.replace("supprime précisément", "").strip()
+        response = f"Tentative de suppression de '{st.session_state.pending_info}'. Code requis."
+    elif "verrouille" in low_p:
+        st.session_state.code_action = "lock_info"
+        st.session_state.pending_info = p.replace("verrouille", "").strip()
+        response = "Mémorisation sécurisée demandée. Veuillez entrer le code d'accès."
+    elif "affiche les archives verrouillées" in low_p:
+        st.session_state.code_action = "view_locked"
+        response = "Accès aux archives scellées demandé. Authentification nécessaire."
+    else:
+        # Réponse standard de DELTA
+        with st.chat_message("assistant"):
+            contexte = f"Infos publiques : {', '.join(faits_publics)}. Infos verrouillées : {', '.join(faits_verrouilles)}"
+            instructions = {"role": "system", "content": f"Tu es DELTA, créé par Monsieur Boran. {contexte}. Majordome fidèle."}
+            r = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[instructions] + st.session_state.messages)
+            response = r.choices[0].message.content
+
+    with st.chat_message("assistant"):
+        st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
