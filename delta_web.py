@@ -17,38 +17,32 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(creds_dict)
         firebase_admin.initialize_app(cred)
     except Exception:
-        st.error("⚠️ Système de Mémoire défaillant.")
+        st.error("⚠️ Connexion Mémoire interrompue.")
 
 db = firestore.client()
-# Références aux documents
-doc_chat = db.collection("memoire").document("chat_history")
 doc_profil = db.collection("memoire").document("profil_monsieur")
 
 # --- CONNEXION GROQ ---
 client = Groq(api_key="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")
 
-# --- CHARGEMENT DES DONNÉES ---
-if "messages" not in st.session_state:
-    # Charger l'historique récent
-    res_chat = doc_chat.get()
-    st.session_state.messages = res_chat.to_dict().get("history", []) if res_chat.exists else []
-
-# Charger la "Fiche de Faits" (Mémoire Longue)
+# --- CHARGEMENT DU PROFIL (MÉMOIRE LONGUE) ---
+# On ne charge plus le chat_history ici pour qu'il s'efface à la fermeture
 res_profil = doc_profil.get()
 faits_connus = res_profil.to_dict().get("faits", []) if res_profil.exists else []
 
 # --- INTERFACE ---
 st.title("⚡ DELTA SYSTEM")
-st.sidebar.title("🧠 Mémoire de DELTA")
 
-if st.sidebar.button("🗑️ Effacer le chat (Pas la mémoire)"):
+# Initialisation de l'historique local uniquement (s'efface à la fermeture)
+if "messages" not in st.session_state:
     st.session_state.messages = []
-    doc_chat.set({"history": []})
-    st.rerun()
 
-st.sidebar.write("**Informations retenues :**")
-for f in faits_connus:
-    st.sidebar.info(f"📍 {f}")
+# Sidebar pour voir ce que DELTA a jugé important
+with st.sidebar:
+    st.title("🧠 Archives")
+    st.write("Informations extraites automatiquement :")
+    for f in faits_connus:
+        st.info(f"🔹 {f}")
 
 # Affichage des messages
 for m in st.session_state.messages:
@@ -56,25 +50,25 @@ for m in st.session_state.messages:
         st.markdown(m["content"])
 
 # --- LOGIQUE DE RÉPONSE ---
-if p := st.chat_input("Ordres, Monsieur ?"):
-    # 1. Analyser si Monsieur donne une info à retenir
-    if any(keyword in p.lower() for keyword in ["retiens que", "note que", "mémorise"]):
-        faits_connus.append(p)
-        doc_profil.set({"faits": faits_connus})
-        st.sidebar.success("Fait enregistré !")
-
-    # 2. Ajouter au chat
+if p := st.chat_input("Vos ordres, Monsieur ?"):
+    # 1. Ajouter au chat local
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"):
         st.markdown(p)
 
-    # 3. Réponse de DELTA
+    # 2. Réponse de DELTA avec tri intelligent
     with st.chat_message("assistant"):
-        # On injecte les FAITS dans le système sans qu'ils soient dans le chat
-        contexte_faits = "Voici ce que tu sais de Monsieur Boran : " + ", ".join(faits_connus)
+        contexte_faits = "Infos importantes sur Monsieur Boran : " + ", ".join(faits_connus)
+        
+        # Instructions pour le tri des infos
         instructions = {
             "role": "system", 
-            "content": f"Tu es DELTA, créé par Monsieur Boran. {contexte_faits}. Tu es son majordome fidèle."
+            "content": f"""Tu es DELTA, créé par Monsieur Boran. {contexte_faits}. 
+            Tu es son majordome fidèle. 
+            MISSION SPÉCIALE : Analyse chaque message de Monsieur. 
+            Si tu détectes une information importante (goûts, noms, codes, habitudes), 
+            réponds normalement MAIS commence ta réponse par le tag [MEMO: l'info à retenir] 
+            pour que je puisse l'extraire."""
         }
         
         full_history = [instructions] + st.session_state.messages
@@ -83,9 +77,19 @@ if p := st.chat_input("Ordres, Monsieur ?"):
             model="llama-3.3-70b-versatile", 
             messages=full_history
         )
-        rep = r.choices[0].message.content
-        st.markdown(rep)
-        st.session_state.messages.append({"role": "assistant", "content": rep})
+        rep_brute = r.choices[0].message.content
+        
+        # Traitement du tag de mémoire
+        if "[MEMO:" in rep_brute:
+            # On extrait l'info entre [MEMO: et ]
+            partie_memo = rep_brute.split("[MEMO:")[1].split("]")[0].strip()
+            if partie_memo not in faits_connus:
+                faits_connus.append(partie_memo)
+                doc_profil.set({"faits": faits_connus})
+            # On nettoie la réponse pour ne pas afficher le tag à Monsieur
+            rep_finale = rep_brute.split("]")[1].strip() if "]" in rep_brute else rep_brute
+        else:
+            rep_finale = rep_brute
 
-    # 4. Sauvegarde du chat
-    doc_chat.set({"history": st.session_state.messages})
+        st.markdown(rep_finale)
+        st.session_state.messages.append({"role": "assistant", "content": rep_finale})
