@@ -24,42 +24,48 @@ doc_ref = db.collection("memoire").document("profil_monsieur")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- FONCTION DE PURGE TOTALE ---
-def purge_totale():
-    # 1. Efface Firebase
-    doc_ref.set({"faits": [], "faits_verrouilles": []})
-    # 2. Efface l'historique local
-    st.session_state.messages = []
-    st.rerun()
+# --- LECTURE DE L'ENTRÉE (AVANT TOUT LE RESTE) ---
+# On récupère l'entrée pour vérifier l'ordre de réinitialisation AVANT d'afficher les archives
+if p := st.chat_input("Ordres, Monsieur ?"):
+    if p.lower().strip() == "réinitialisation complète":
+        # 1. Purge RÉELLE dans Firebase
+        doc_ref.set({"faits": [], "faits_verrouilles": []})
+        # 2. Vide l'historique de discussion
+        st.session_state.messages = []
+        # 3. RELANCE TOUT pour vider l'affichage
+        st.rerun()
+    else:
+        st.session_state.temp_prompt = p
 
-# --- CHARGEMENT MÉMOIRE ---
+# --- CHARGEMENT MÉMOIRE (APRÈS VÉRIFICATION DE PURGE) ---
 res = doc_ref.get()
 faits = res.to_dict().get("faits", []) if res.exists else []
 
-# --- SIDEBAR ---
+# --- SIDEBAR (ARCHIVES) ---
 with st.sidebar:
     st.title("🧠 Archives")
-    for i, f in enumerate(faits):
+    if not faits:
+        st.write("Archives vides.")
+    for f in faits:
         st.info(f)
 
 # --- CHAT ---
 st.title("⚡ DELTA OS")
-
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-if p := st.chat_input("Ordres ?"):
-    # VÉRIFICATION DE L'ORDRE DE PURGE
-    if p.lower().strip() == "réinitialisation complète":
-        purge_totale()
+# --- TRAITEMENT DU MESSAGE SI PAS DE PURGE ---
+if "temp_prompt" in st.session_state:
+    prompt = st.session_state.temp_prompt
+    del st.session_state.temp_prompt
     
-    st.session_state.messages.append({"role": "user", "content": p})
-    with st.chat_message("user"): st.markdown(p)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.markdown(prompt)
 
     # APPEL IA
     client = Groq(api_key="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")
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA. Infos sur l'utilisateur : {faits}"
+        instr = f"Tu es DELTA. Voici les faits actuels : {faits}"
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": instr}] + st.session_state.messages
