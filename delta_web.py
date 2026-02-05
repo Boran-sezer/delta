@@ -35,42 +35,43 @@ data = res_profil.to_dict() if res_profil.exists else {}
 faits_publics = data.get("faits", [])
 faits_verrouilles = data.get("faits_verrouilles", [])
 
-# --- FONCTION DE SÉCURITÉ (LA MODALE) ---
-@st.dialog("🔒 AUTHENTIFICATION REQUISE")
-def verifier_code(action, info=None):
-    st.write(f"Action : **{action}**")
-    code = st.text_input("Entrez le code de sécurité (20082008) :", type="password")
-    if st.button("VALIDER L'ACCÈS"):
+# --- FONCTION DE SÉCURITÉ (POUR LES ACTIONS SENSIBLES) ---
+@st.dialog("🔑 SÉCURITÉ")
+def demande_code(type_action, info=None):
+    st.write(f"Action demandée : **{type_action}**")
+    code = st.text_input("Code (20082008) :", type="password")
+    if st.button("CONFIRMER"):
         if code == "20082008":
-            if action == "PURGE TOTALE":
+            if type_action == "RÉINITIALISATION TOTALE":
                 doc_profil.set({"faits": [], "faits_verrouilles": []})
-                st.success("Mémoire effacée.")
-            elif action == "SUPPRESSION CIBLÉE":
+                st.success("Toutes les données sont purgées.")
+            elif type_action == "SUPPRESSION CIBLÉE":
                 t = info.lower()
                 new_pub = [f for f in faits_publics if t not in f.lower()]
                 new_priv = [f for f in faits_verrouilles if t not in f.lower()]
                 doc_profil.set({"faits": new_pub, "faits_verrouilles": new_priv})
-                st.success("Cible éliminée.")
-            elif action == "SCELLAGE":
+                st.success("Élément supprimé.")
+            elif type_action == "VERROUILLAGE":
                 faits_verrouilles.append(info)
                 doc_profil.update({"faits_verrouilles": faits_verrouilles})
                 st.success("Info scellée.")
-            elif action == "DÉVERROUILLAGE":
+            elif type_action == "ACCÈS COFFRE":
                 st.session_state.unlocked = True
-            
             st.rerun()
         else:
-            st.error("CODE INCORRECT.")
+            st.error("CODE INCORRECT")
 
 # --- INTERFACE ---
 st.title("⚡ DELTA SYSTEM")
 
 with st.sidebar:
     st.title("🧠 Archives")
+    st.subheader("Informations")
     for i, f in enumerate(faits_publics):
         col1, col2 = st.columns([4, 1])
-        col1.info(f)
-        if col2.button("🗑️", key=f"p_{i}"):
+        col1.info(f"{f}")
+        # Suppression SANS code pour les archives normales
+        if col2.button("🗑️", key=f"pub_{i}"):
             faits_publics.pop(i)
             doc_profil.update({"faits": faits_publics})
             st.rerun()
@@ -79,40 +80,55 @@ with st.sidebar:
         st.subheader("🔐 Scellées")
         for i, f in enumerate(faits_verrouilles):
             col1, col2 = st.columns([4, 1])
-            col1.warning(f)
-            if col2.button("🗑️", key=f"s_{i}"):
+            col1.warning(f"{f}")
+            if col2.button("🗑️", key=f"priv_{i}"):
                 faits_verrouilles.pop(i)
                 doc_profil.update({"faits_verrouilles": faits_verrouilles})
                 st.rerun()
-        if st.button("Fermer le coffre"):
-            st.session_state.unlocked = False
-            st.rerun()
+        if st.button("Fermer"): st.session_state.unlocked = False; st.rerun()
 
 # --- CHAT ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-if p := st.chat_input("Ordres ?"):
+if p := st.chat_input("Vos ordres, Monsieur ?"):
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"): st.markdown(p)
 
     low_p = p.lower()
     
+    # 1. Analyse des commandes de sécurité
     if "réinitialisation complète" in low_p:
-        verifier_code("PURGE TOTALE")
+        demande_code("RÉINITIALISATION TOTALE")
     elif "supprime précisément" in low_p:
-        target = p.replace("supprime précisément", "").strip()
-        verifier_code("SUPPRESSION CIBLÉE", target)
+        cible = p.replace("supprime précisément", "").strip()
+        demande_code("SUPPRESSION CIBLÉE", cible)
     elif "verrouille" in low_p:
         secret = p.replace("verrouille", "").strip()
-        verifier_code("SCELLAGE", secret)
+        demande_code("VERROUILLAGE", secret)
     elif "affiche les archives verrouillées" in low_p:
-        verifier_code("DÉVERROUILLAGE")
+        demande_code("ACCÈS COFFRE")
+    
+    # 2. Réponse standard et tri intelligent
     else:
         with st.chat_message("assistant"):
-            ctx = f"Infos: {faits_publics}. Coffre: {faits_verrouilles if st.session_state.unlocked else 'Caché'}."
-            instr = {"role": "system", "content": f"Tu es DELTA, majordome de Monsieur Boran. {ctx}"}
+            contexte = f"Infos connues : {', '.join(faits_publics)}. "
+            instr = {
+                "role": "system", 
+                "content": f"Tu es DELTA, majordome de Monsieur Boran. {contexte} Analyse le message de Monsieur. S'il y a une info importante à retenir (goût, nom, habitude), réponds en commençant par [SAVE: l'info] sinon réponds normalement."
+            }
             r = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[instr] + st.session_state.messages)
-            rep = r.choices[0].message.content
-            st.markdown(rep)
-            st.session_state.messages.append({"role": "assistant", "content": rep})
+            rep_brute = r.choices[0].message.content
+            
+            # Extraction auto
+            if "[SAVE:" in rep_brute:
+                info_a_sauver = rep_brute.split("[SAVE:")[1].split("]")[0].strip()
+                if info_a_sauver not in faits_publics:
+                    faits_publics.append(info_a_sauver)
+                    doc_profil.update({"faits": faits_publics})
+                rep_finale = rep_brute.split("]")[1].strip() if "]" in rep_brute else rep_brute
+            else:
+                rep_finale = rep_brute
+
+            st.markdown(rep_finale)
+            st.session_state.messages.append({"role": "assistant", "content": rep_finale})
