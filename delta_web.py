@@ -1,42 +1,54 @@
 import streamlit as st
 
-# 1. État de session
-if "sec_mode" not in st.session_state: st.session_state.sec_mode = "OFF"
-if "essais" not in st.session_state: st.session_state.essais = 0
+# --- INITIALISATION DES ÉTATS ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "security_mode" not in st.session_state:
+    st.session_state.security_mode = False
+if "attempts" not in st.session_state:
+    st.session_state.attempts = 0
 
-st.title("⚡ DELTA DEBUG MODE")
-st.write(f"ÉTAT SYSTÈME : {st.session_state.sec_mode}")
+st.title("⚡ DELTA SYSTEM")
 
-# 2. Entrée utilisateur
-p = st.chat_input("Tapez 'réinitialisation complète' pour tester")
+# --- AFFICHAGE DU CHAT ---
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-if p:
-    low_p = p.lower().strip()
-    
-    # LOGIQUE DE SÉCURITÉ RADICALE
-    if st.session_state.sec_mode == "ON":
-        if st.session_state.essais < 3:
-            if p == "20082008":
-                st.success("✅ CODE VALIDE")
-                st.session_state.sec_mode = "OFF"
-                st.session_state.essais = 0
-            else:
-                st.session_state.essais += 1
-                st.error(f"❌ MAUVAIS CODE ({st.session_state.essais}/3)")
+# --- ZONE DE SAISIE ---
+if p := st.chat_input("Vos ordres ?"):
+    st.session_state.messages.append({"role": "user", "content": p})
+    with st.chat_message("user"):
+        st.markdown(p)
+
+    rep = ""
+
+    # 1. SI ON ATTEND LE CODE
+    if st.session_state.security_mode:
+        if p == "20082008":
+            rep = "✅ **Code correct.** Réinitialisation effectuée."
+            st.session_state.security_mode = False
+            st.session_state.attempts = 0
         else:
-            if p == "B2008a2020@":
-                st.success("✅ CODE PRO MAX VALIDE")
-                st.session_state.sec_mode = "OFF"
-                st.session_state.essais = 0
+            st.session_state.attempts += 1
+            if st.session_state.attempts < 3:
+                rep = f"❌ **Code incorrect.** Recommencez (Essai {st.session_state.attempts}/3)."
             else:
-                st.error("🚨 ÉCHEC FINAL")
-                st.session_state.sec_mode = "OFF"
-                st.session_state.essais = 0
-    
-    elif "réinitialisation complète" in low_p:
-        st.session_state.sec_mode = "ON"
-        st.session_state.essais = 0
-        st.warning("🔒 CODE REQUIS !")
-    
+                rep = "🔴 **ROUGE**"
+                st.session_state.security_mode = False
+                st.session_state.attempts = 0
+
+    # 2. DÉTECTION DE LA DEMANDE DE RÉINITIALISATION
+    elif "réinitialisation" in p.lower():
+        st.session_state.security_mode = True
+        st.session_state.attempts = 0
+        rep = "🔒 **Sécurité activée.** Veuillez entrer le code d'accès."
+
+    # 3. RÉPONSE PAR DÉFAUT
     else:
-        st.write(f"Vous avez dit : {p}")
+        rep = "Je suis à votre écoute. Dites 'réinitialisation' pour tester le protocole."
+
+    # AFFICHAGE DE LA RÉPONSE
+    with st.chat_message("assistant"):
+        st.markdown(rep)
+        st.session_state.messages.append({"role": "assistant", "content": rep})
