@@ -4,10 +4,10 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import os
 
-# Connexion directe via le fichier JSON
+# Connexion directe par fichier pour éviter les erreurs Cloud
 if not firebase_admin._apps:
     try:
-        # On pointe directement vers le fichier que vous venez de créer
+        # On lit le fichier qu'on vient de créer
         path = os.path.join(os.getcwd(), "service_account.json")
         cred = credentials.Certificate(path)
         firebase_admin.initialize_app(cred)
