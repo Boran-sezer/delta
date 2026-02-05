@@ -6,12 +6,12 @@ import base64
 import json
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="DELTA OS", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="DELTA OS", page_icon="⚡")
 
 # --- ÉTATS DE SESSION ---
 if "messages" not in st.session_state: st.session_state.messages = []
-if "security_mode" not in st.session_state: st.session_state.security_mode = False
-if "attempts" not in st.session_state: st.session_state.attempts = 0
+if "sec_active" not in st.session_state: st.session_state.sec_active = False
+if "essais" not in st.session_state: st.session_state.essais = 0
 
 # --- INITIALISATION FIREBASE ---
 if not firebase_admin._apps:
@@ -26,65 +26,61 @@ db = firestore.client()
 doc_profil = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- CHAT ---
+# --- AFFICHAGE CHAT ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-if p := st.chat_input("Vos ordres, Monsieur ?"):
+# --- LE MOTEUR DE DÉCISION ---
+if p := st.chat_input("Ordres ?"):
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"): st.markdown(p)
-
-    rep = ""
+    
     low_p = p.lower().strip()
 
-    # 🛡️ 1. LOGIQUE DE SÉCURITÉ (PRIORITÉ ABSOLUE)
-    # Si on est déjà en mode sécurité OU si on demande une réinitialisation
-    if st.session_state.security_mode or "réinitialisation" in low_p:
+    # 🛡️ 1. DÉTECTION PRIORITAIRE (COURT-CIRCUIT)
+    if "réinitialisation" in low_p or st.session_state.sec_active:
         
-        # Si c'est le premier déclenchement
-        if not st.session_state.security_mode:
-            st.session_state.security_mode = True
-            st.session_state.attempts = 0
-            rep = "🔒 **MODE SÉCURITÉ ACTIVÉ.** Veuillez entrer le code d'accès."
+        # Premier déclenchement
+        if not st.session_state.sec_active:
+            st.session_state.sec_active = True
+            st.session_state.essais = 0
+            rep = "🔒 **PROTOCOLE DE SÉCURITÉ.** Entrez le code."
         
-        # Si on attend le code
+        # Vérification des codes
         else:
             code_normal = "20082008"
             code_promax = "B2008a2020@"
             
-            # Gestion des essais
-            if st.session_state.attempts < 3:
+            if st.session_state.essais < 3:
                 if p == code_normal:
                     doc_profil.set({"faits": [], "faits_verrouilles": []})
-                    rep = "✅ **SYSTÈME RÉINITIALISÉ.**"
-                    st.session_state.security_mode = False
-                    st.session_state.attempts = 0
+                    rep = "✅ **SYSTÈME PURGÉ.**"
+                    st.session_state.sec_active = False
                 else:
-                    st.session_state.attempts += 1
-                    if st.session_state.attempts < 3:
-                        rep = f"❌ **CODE INCORRECT.** Recommencez (Essai {st.session_state.attempts}/3)."
+                    st.session_state.essais += 1
+                    if st.session_state.essais < 3:
+                        rep = f"❌ **CODE FAUX.** Recommencez ({st.session_state.essais}/3)."
                     else:
-                        rep = "⚠️ **3 ÉCHECS.** Protocole de secours : Entrez le CODE PRO MAX (B2008a2020@)."
-            
-            else: # 4ème essai (Code Pro Max)
+                        rep = "⚠️ **3 ÉCHECS.** Entrez le CODE PRO MAX (B2008a2020@)."
+            else:
                 if p == code_promax:
                     doc_profil.set({"faits": [], "faits_verrouilles": []})
                     rep = "✅ **ACCÈS PRO MAX VALIDÉ.** Purge effectuée."
-                    st.session_state.security_mode = False
-                    st.session_state.attempts = 0
+                    st.session_state.sec_active = False
                 else:
                     rep = "🔴 **ROUGE**"
-                    st.session_state.security_mode = False
-                    st.session_state.attempts = 0
-
-    # 🤖 2. RÉPONSE IA NORMALE (Seulement si PAS de sécurité)
-    else:
+                    st.session_state.sec_active = False
+        
+        # ON FORCE L'AFFICHAGE ET ON STOPPE TOUT (L'IA ne sera jamais appelée)
         with st.chat_message("assistant"):
-            instr = {"role": "system", "content": "Tu es DELTA, majordome de Monsieur Boran. Sois efficace."}
-            r = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[instr] + st.session_state.messages)
-            rep = r.choices[0].message.content
-
-    # AFFICHAGE FINAL
-    with st.chat_message("assistant"):
-        st.markdown(rep)
+            st.markdown(rep)
         st.session_state.messages.append({"role": "assistant", "content": rep})
+        st.stop() # <--- COURT-CIRCUIT : L'IA est bloquée ici
+
+    # 🤖 2. IA NORMALE (Uniquement si le code n'a pas été stoppé au-dessus)
+    with st.chat_message("assistant"):
+        instr = {"role": "system", "content": "Tu es DELTA. Sois bref."}
+        r = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[instr] + st.session_state.messages)
+        rep_ia = r.choices[0].message.content
+        st.markdown(rep_ia)
+        st.session_state.messages.append({"role": "assistant", "content": rep_ia})
