@@ -5,82 +5,94 @@ from firebase_admin import credentials, firestore
 import base64
 import json
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="DELTA OS", page_icon="⚡")
-
-# --- ÉTATS DE SESSION ---
-if "messages" not in st.session_state: st.session_state.messages = []
-if "sec_active" not in st.session_state: st.session_state.sec_active = False
-if "essais" not in st.session_state: st.session_state.essais = 0
+# --- CONFIGURATION DE LA PAGE ---
+st.set_page_config(page_title="DELTA OS", page_icon="⚡", layout="wide")
 
 # --- INITIALISATION FIREBASE ---
 if not firebase_admin._apps:
     try:
+        # Récupération de la clé encodée dans les secrets Streamlit
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
         decoded_json = base64.b64decode(encoded).decode("utf-8")
-        cred = credentials.Certificate(json.loads(decoded_json))
+        creds_dict = json.loads(decoded_json)
+        cred = credentials.Certificate(creds_dict)
         firebase_admin.initialize_app(cred)
-    except: pass
+    except Exception as e:
+        st.error(f"⚠️ Erreur de connexion Mémoire : {e}")
 
 db = firestore.client()
-doc_profil = db.collection("memoire").document("profil_monsieur")
+doc_ref = db.collection("memoire").document("profil_monsieur")
+
+# --- CONNEXION GROQ ---
 client = Groq(api_key="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")
 
-# --- AFFICHAGE CHAT ---
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+# --- ÉTATS DE SESSION ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# --- LE MOTEUR DE DÉCISION ---
-if p := st.chat_input("Ordres ?"):
-    st.session_state.messages.append({"role": "user", "content": p})
-    with st.chat_message("user"): st.markdown(p)
+# --- CHARGEMENT DES DONNÉES DEPUIS FIREBASE ---
+res = doc_ref.get()
+if res.exists:
+    faits = res.to_dict().get("faits", [])
+else:
+    faits = []
+    doc_ref.set({"faits": []})
+
+# --- BARRE LATÉRALE (ARCHIVES) ---
+with st.sidebar:
+    st.title("🧠 Archives de Monsieur")
+    st.write("Informations mémorisées :")
     
-    low_p = p.lower().strip()
+    # Affichage des faits avec option de suppression
+    for i, fait in enumerate(faits):
+        col1, col2 = st.columns([4, 1])
+        col1.info(fait)
+        if col2.button("🗑️", key=f"del_{i}"):
+            faits.pop(i)
+            doc_ref.update({"faits": faits})
+            st.rerun()
 
-    # 🛡️ 1. DÉTECTION PRIORITAIRE (COURT-CIRCUIT)
-    if "réinitialisation" in low_p or st.session_state.sec_active:
-        
-        # Premier déclenchement
-        if not st.session_state.sec_active:
-            st.session_state.sec_active = True
-            st.session_state.essais = 0
-            rep = "🔒 **PROTOCOLE DE SÉCURITÉ.** Entrez le code."
-        
-        # Vérification des codes
-        else:
-            code_normal = "20082008"
-            code_promax = "B2008a2020@"
-            
-            if st.session_state.essais < 3:
-                if p == code_normal:
-                    doc_profil.set({"faits": [], "faits_verrouilles": []})
-                    rep = "✅ **SYSTÈME PURGÉ.**"
-                    st.session_state.sec_active = False
-                else:
-                    st.session_state.essais += 1
-                    if st.session_state.essais < 3:
-                        rep = f"❌ **CODE FAUX.** Recommencez ({st.session_state.essais}/3)."
-                    else:
-                        rep = "⚠️ **3 ÉCHECS.** Entrez le CODE PRO MAX (B2008a2020@)."
-            else:
-                if p == code_promax:
-                    doc_profil.set({"faits": [], "faits_verrouilles": []})
-                    rep = "✅ **ACCÈS PRO MAX VALIDÉ.** Purge effectuée."
-                    st.session_state.sec_active = False
-                else:
-                    rep = "🔴 **ROUGE**"
-                    st.session_state.sec_active = False
-        
-        # ON FORCE L'AFFICHAGE ET ON STOPPE TOUT (L'IA ne sera jamais appelée)
-        with st.chat_message("assistant"):
-            st.markdown(rep)
-        st.session_state.messages.append({"role": "assistant", "content": rep})
-        st.stop() # <--- COURT-CIRCUIT : L'IA est bloquée ici
+# --- INTERFACE DE CHAT ---
+st.title("⚡ DELTA OS")
 
-    # 🤖 2. IA NORMALE (Uniquement si le code n'a pas été stoppé au-dessus)
+# Affichage de l'historique
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Entrée utilisateur
+if prompt := st.chat_input("Quels sont vos ordres, Monsieur Boran ?"):
+    # 1. Afficher le message utilisateur
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # 2. Préparation de l'instruction système avec la mémoire
+    instruction = (
+        "Tu es DELTA, une IA sophistiquée, majordome personnel de Monsieur Boran. "
+        "Tu es loyal, efficace et tu as accès à ses archives personnelles pour personnaliser tes réponses. "
+        f"Voici ce que tu sais sur lui : {', '.join(faits)}. "
+        "Sois concis et utilise des émojis."
+    )
+
+    # 3. Appel à l'IA (Groq)
     with st.chat_message("assistant"):
-        instr = {"role": "system", "content": "Tu es DELTA. Sois bref."}
-        r = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[instr] + st.session_state.messages)
-        rep_ia = r.choices[0].message.content
-        st.markdown(rep_ia)
-        st.session_state.messages.append({"role": "assistant", "content": rep_ia})
+        try:
+            full_messages = [{"role": "system", "content": instruction}] + st.session_state.messages
+            
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=full_messages,
+                temperature=0.7
+            )
+            
+            response = completion.choices[0].message.content
+            st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
+            # 4. ANALYSE POUR MÉMORISATION (Optionnel/Automatique)
+            # Si le message semble contenir une info importante, l'IA pourrait suggérer de l'enregistrer
+            # Ici, on reste sur la version simple : vous gérez manuellement via les archives.
+
+        except Exception as e:
+            st.error(f"Désolé Monsieur, une erreur système est survenue : {e}")
