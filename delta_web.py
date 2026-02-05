@@ -50,30 +50,32 @@ st.title("⚡ DELTA OS")
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-if p := st.chat_input("Quels sont vos ordres, Monsieur ?"):
+if p := st.chat_input("Vos ordres, Monsieur ?"):
     low_p = p.lower().strip()
     
-    # --- 🛠️ LOGIQUE D'ARCHIVAGE MANUELLE ---
-    # Si vous dites : "Archive : [votre info]"
-    if low_p.startswith("archive :") or low_p.startswith("mémorise :"):
-        nouvelle_info = p.split(":", 1)[1].strip()
-        faits.append(nouvelle_info)
-        doc_ref.update({"faits": faits})
-        st.success(f"✅ Info archivée : {nouvelle_info}")
-        # On ne passe pas par l'IA pour économiser du temps
-        st.session_state.messages.append({"role": "user", "content": p})
-        st.session_state.messages.append({"role": "assistant", "content": f"C'est fait Monsieur, j'ai ajouté '{nouvelle_info}' à vos archives. 🗄️"})
-        st.rerun()
+    # 🛠️ AUTO-DÉTECTION DE L'ARCHIVAGE (Plus flexible)
+    keywords = ["archive", "mémorise", "enregistre", "souviens-toi"]
+    if any(word in low_p for word in keywords):
+        # On extrait l'info (on enlève le mot clé s'il est au début)
+        info = p
+        for word in keywords: info = info.replace(word, "").replace(":", "").strip()
+        
+        if info:
+            faits.append(info)
+            doc_ref.update({"faits": faits})
+            st.toast(f"Mémoire mise à jour : {info}") # Petit message discret en bas
 
-    # --- LOGIQUE NORMALE ---
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"): st.markdown(p)
 
     with st.chat_message("assistant"):
+        # --- 🛡️ INSTRUCTION ANTI-AMNÉSIE ---
         instr = (
             "Tu es DELTA, le majordome de Monsieur Boran. "
-            f"Archives actuelles : {faits}. "
-            "Si Monsieur te donne une information importante, suggère-lui de l'archiver en commençant sa phrase par 'Archive :'."
+            "TU AS LA CAPACITÉ DE STOCKER DES DONNÉES via ta base de données Firebase. "
+            f"Voici tes archives actuelles : {faits}. "
+            "Si Monsieur te demande de retenir quelque chose, confirme-lui que c'est fait et que c'est stocké dans tes archives. "
+            "Ne dis JAMAIS que tu ne peux pas mémoriser. Sois bref et efficace."
         )
         
         r = client.chat.completions.create(
@@ -83,3 +85,7 @@ if p := st.chat_input("Quels sont vos ordres, Monsieur ?"):
         rep = r.choices[0].message.content
         st.markdown(rep)
         st.session_state.messages.append({"role": "assistant", "content": rep})
+        
+        # On force un rerun si une info a été ajoutée pour l'afficher dans la sidebar
+        if any(word in low_p for word in keywords):
+            st.rerun()
