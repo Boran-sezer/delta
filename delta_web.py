@@ -50,41 +50,45 @@ st.title("⚡ DELTA OS")
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-if p := st.chat_input("Vos ordres, Monsieur ?"):
-    low_p = p.lower().strip()
-    
-    # 🛠️ LOGIQUE D'ARCHIVAGE INTELLIGENTE
-    keywords = ["archive", "mémorise", "enregistre", "souviens-toi"]
-    # On n'archive QUE si un mot-clé est présent ET que "supprime/efface" n'est PAS là
-    if any(word in low_p for word in keywords) and not any(anti in low_p for anti in ["supprime", "efface", "vire"]):
-        info = p
-        for word in keywords: info = info.replace(word, "").replace(":", "").strip()
-        
-        if info:
-            faits.append(info)
-            doc_ref.update({"faits": faits})
-            st.toast(f"Mémoire mise à jour : {info}")
-
+if p := st.chat_input("Quels sont vos ordres, Monsieur ?"):
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"): st.markdown(p)
 
     with st.chat_message("assistant"):
+        # 🛡️ INSTRUCTION SYSTÈME AVEC AUTONOMIE D'ARCHIVAGE
         instr = (
             "Tu es DELTA, le majordome de Monsieur Boran. "
-            "TU AS LA CAPACITÉ DE STOCKER DES DONNÉES via Firebase. "
             f"Archives actuelles : {faits}. "
-            "Si Monsieur veut supprimer une archive, dis-lui d'utiliser les boutons 🗑️ dans la barre latérale. "
-            "Ne dis JAMAIS que tu ne peux pas mémoriser. Sois bref."
+            "RÈGLE D'ARCHIVAGE : Analyse les messages de Monsieur. Si tu détectes une information personnelle, "
+            "une préférence ou un fait important qu'il n'a pas encore archivé, "
+            "ajoute impérativement 'ACTION_ARCHIVE: [info]' à la fin de ta réponse pour le mémoriser."
         )
         
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": instr}] + st.session_state.messages
         )
-        rep = r.choices[0].message.content
-        st.markdown(rep)
-        st.session_state.messages.append({"role": "assistant", "content": rep})
         
-        # Rerun seulement si on a archivé quelque chose
-        if any(word in low_p for word in keywords) and not any(anti in low_p for anti in ["supprime", "efface"]):
+        rep = r.choices[0].message.content
+        
+        # --- TRAITEMENT DE L'ARCHIVAGE PROACTIF ---
+        if "ACTION_ARCHIVE:" in rep:
+            partie_archive = rep.split("ACTION_ARCHIVE:")[1].strip()
+            # On vérifie si l'info n'est pas déjà présente
+            if partie_archive not in faits:
+                faits.append(partie_archive)
+                doc_ref.update({"faits": faits})
+                st.toast(f"Nouvelle archive ajoutée : {partie_archive}")
+            
+            # Nettoyage de la réponse
+            propre = rep.split("ACTION_ARCHIVE:")[0].strip()
+            st.markdown(propre)
+            st.session_state.messages.append({"role": "assistant", "content": propre})
             st.rerun()
+        else:
+            st.markdown(rep)
+            st.session_state.messages.append({"role": "assistant", "content": rep})
+
+# --- NOTE DE MÉMOIRE ---
+# D'accord, je garde ça en mémoire. Vous pouvez à tout moment me demander d'oublier 
+# certaines informations ou les gérer dans vos paramètres (https://gemini.google.com/saved-info).
