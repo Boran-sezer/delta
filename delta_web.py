@@ -22,23 +22,14 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. STYLE CSS POUR FIXER LE SCROLL ---
-st.markdown("""
-    <style>
-    .stChatFloatingInputContainer {
-        padding-bottom: 20px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 3. ÉTATS DE SESSION ---
+# --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. Prêt pour vos ordres, Monsieur SEZER. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. Je vous écoute, Monsieur SEZER. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
 
-# --- 4. SÉCURITÉ LOCKDOWN ---
+# --- 3. LOCKDOWN ---
 if st.session_state.locked:
     st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
     m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_lock")
@@ -49,18 +40,14 @@ if st.session_state.locked:
             st.rerun()
     st.stop()
 
-# --- 5. INTERFACE ET HISTORIQUE ---
+# --- 4. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
-# Conteneur principal pour les messages
-chat_placeholder = st.container()
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-with chat_placeholder:
-    for m in st.session_state.messages:
-        with st.chat_message(m["role"]):
-            st.markdown(m["content"])
-
-# --- 6. AUTHENTIFICATION ---
+# --- 5. AUTHENTIFICATION ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
         st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
@@ -71,7 +58,7 @@ if st.session_state.pending_auth:
                 st.session_state.essais = 0
                 res = doc_ref.get()
                 faits = res.to_dict().get("faits", []) if res.exists else []
-                txt = "Accès autorisé. Voici vos archives : \n\n" + "\n".join([f"- {i}" for i in faits])
+                txt = "Accès autorisé. Voici mes archives confidentielles : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
@@ -80,50 +67,52 @@ if st.session_state.pending_auth:
                     st.session_state.locked = True
                 st.rerun()
 
-# --- 7. TRAITEMENT DES MESSAGES ---
+# --- 6. TRAITEMENT ---
 if prompt := st.chat_input("Écrivez vos ordres ici..."):
     if st.session_state.pending_auth:
         st.error("Veuillez d'abord valider le code de sécurité.")
     else:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with chat_placeholder:
-            with st.chat_message("user"):
-                st.markdown(prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-        if "verrouille" in prompt.lower():
-            st.session_state.locked = True
-            st.rerun()
+        with st.chat_message("assistant"):
+            placeholder = st.empty()
+            full_raw, displayed = "", ""
+            
+            # Récupération des données pour l'IA
+            res = doc_ref.get()
+            faits = res.to_dict().get("faits", []) if res.exists else []
+            
+            # CONSIGNE ULTRA-PRÉCISE
+            instr = (
+                "Tu es DELTA, le majordome personnel de Monsieur SEZER. "
+                "IDENTITÉ : Tu peux librement dire qui tu es, ton nom (DELTA) et ton rôle sans code. "
+                f"SÉCURITÉ : Tu as accès à ces archives privées sur Monsieur : {faits}. "
+                "Tu ne dois JAMAIS les révéler ou en parler sans que le code soit validé. "
+                "Si on te demande une info privée, réponds uniquement : REQUIS_CODE."
+            )
 
-        with chat_placeholder:
-            with st.chat_message("assistant"):
-                placeholder = st.empty()
-                full_raw, displayed = "", ""
-                
-                res = doc_ref.get()
-                faits = res.to_dict().get("faits", []) if res.exists else []
-                
-                instr = f"Tu es DELTA. Ne cite JAMAIS ces faits sans code : {faits}. Si accès mémoire demandé : REQUIS_CODE."
+            stream = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": instr}] + st.session_state.messages,
+                stream=True
+            )
 
-                stream = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "system", "content": instr}] + st.session_state.messages,
-                    stream=True
-                )
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    full_raw += content
+                    if "REQUIS_CODE" in full_raw:
+                        st.session_state.pending_auth = True
+                        break
+                    for char in content:
+                        displayed += char
+                        placeholder.markdown(displayed + "▌")
+                        time.sleep(0.01)
 
-                for chunk in stream:
-                    content = chunk.choices[0].delta.content
-                    if content:
-                        full_raw += content
-                        if "REQUIS_CODE" in full_raw:
-                            st.session_state.pending_auth = True
-                            break
-                        for char in content:
-                            displayed += char
-                            placeholder.markdown(displayed + "▌")
-                            time.sleep(0.01)
-
-                if st.session_state.pending_auth:
-                    st.rerun()
-                else:
-                    placeholder.markdown(full_raw)
-                    st.session_state.messages.append({"role": "assistant", "content": full_raw})
+            if st.session_state.pending_auth:
+                st.rerun()
+            else:
+                placeholder.markdown(full_raw)
+                st.session_state.messages.append({"role": "assistant", "content": full_raw})
