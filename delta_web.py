@@ -36,18 +36,19 @@ faits = data.get("faits", [])
 # --- 4. SÉCURITÉ ---
 if st.session_state.locked:
     st.error("🚨 SYSTÈME VERROUILLÉ")
-    if st.text_input("CODE MAÎTRE :", type="password") == CODE_MASTER:
+    if st.text_input("CODE MAÎTRE :", type="password", key="master") == CODE_MASTER:
         st.session_state.locked = False
         st.rerun()
     st.stop()
 
-# --- 5. FONCTION DE RÉPONSE ET GESTION MÉMOIRE ---
+# --- 5. FONCTION DE RÉPONSE ---
 def reponse_delta(prompt, special_instr=None):
+    # Instructions renforcées pour la suppression
     instr = special_instr if special_instr else (
         f"Tu es DELTA, majordome de Monsieur SEZER. Ultra-concis. "
         f"Archives : {faits}. "
-        "Si on te demande de supprimer une info, réponds par 'ACTION_DELETE: [texte précis à supprimer]'."
-        "Si tu apprends une info : 'ACTION_ARCHIVE: [info]'."
+        "Si Monsieur demande de supprimer/enlever une info, tu DOIS répondre EXACTEMENT : ACTION_DELETE: [élément à supprimer]."
+        "Sinon, si tu apprends une info : ACTION_ARCHIVE: [info]."
     )
     
     with st.chat_message("assistant"):
@@ -69,20 +70,21 @@ def reponse_delta(prompt, special_instr=None):
                     placeholder.markdown(displayed + "▌")
                     time.sleep(0.01)
         
-        # --- TRAITEMENT DES ACTIONS ---
         clean = full_raw.split("ACTION_")[0].strip()
         placeholder.markdown(clean)
         
-        # SUPPRESSION
+        # LOGIQUE DE SUPPRESSION AMÉLIORÉE
         if "ACTION_DELETE:" in full_raw:
             cible = full_raw.split("ACTION_DELETE:")[1].strip().lower()
+            # On filtre la liste : on garde tout ce qui ne contient pas le mot clé
             nouveaux_faits = [f for f in faits if cible not in f.lower()]
-            doc_ref.set({"faits": nouveaux_faits}, merge=True)
-            st.toast("Information supprimée.")
-            time.sleep(1)
-            st.rerun()
+            if len(nouveaux_faits) < len(faits):
+                doc_ref.set({"faits": nouveaux_faits}, merge=True)
+                st.toast("Mémoire nettoyée, Monsieur SEZER.")
+                time.sleep(1)
+                st.rerun()
 
-        # ARCHIVAGE
+        # LOGIQUE D'ARCHIVAGE
         if "ACTION_ARCHIVE:" in full_raw:
             info = full_raw.split("ACTION_ARCHIVE:")[1].strip()
             if info not in faits:
@@ -97,26 +99,35 @@ st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
+# SÉCURITÉ UNIFIÉE (Archives OU Mémoire)
 if st.session_state.ask_auth:
     with st.chat_message("assistant"):
-        st.warning("🔒 Identification requise.")
-        if st.text_input("CODE :", type="password") == CODE_ACT:
-            if st.button("CONFIRMER"):
+        st.warning("🔒 Identification requise pour la mémoire.")
+        pwd = st.text_input("CODE :", type="password", key="pwd_input")
+        if st.button("CONFIRMER"):
+            if pwd == CODE_ACT:
                 st.session_state.ask_auth = False
-                reponse_delta("Affiche les archives", f"Liste les archives : {faits}")
+                reponse_delta("Montre la mémoire", f"Liste les archives : {faits}")
                 st.rerun()
+            else:
+                st.error("Code erroné.")
     st.stop()
 
 if prompt := st.chat_input("Ordres ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     p_low = prompt.lower()
     
+    # 1. Verrouillage
     if "verrouille" in p_low:
         st.session_state.locked = True
         st.rerun()
-    elif any(w in p_low for w in ["archive", "mémoire"]):
+    
+    # 2. Sécurité Unifiée : Bloque si "archive" OU "mémoire" est présent
+    elif any(w in p_low for w in ["archive", "mémoire", "souviens"]):
         st.session_state.ask_auth = True
         st.rerun()
+    
+    # 3. Réponse normale (inclut la suppression)
     else:
         reponse_delta(prompt)
         st.rerun()
