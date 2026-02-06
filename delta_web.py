@@ -33,7 +33,7 @@ res = doc_ref.get()
 data = res.to_dict() if res.exists else {"faits": []}
 faits = data.get("faits", [])
 
-# --- 4. SÉCURITÉ LOCKDOWN ---
+# --- 4. SÉCURITÉ ---
 if st.session_state.locked:
     st.error("🚨 SYSTÈME BLOQUÉ")
     m_input = st.text_input("CODE MAÎTRE :", type="password")
@@ -43,14 +43,14 @@ if st.session_state.locked:
             st.rerun()
     st.stop()
 
-# --- 5. GÉNÉRATEUR AVEC VITESSE CONTRÔLÉE ---
-def generer_reponse_lente(prompt):
+# --- 5. GÉNÉRATEUR SILENCIEUX ET LENT ---
+def generer_reponse_discrete(prompt):
     instr = (
-        "Tu es DELTA IA, le majordome discret de Monsieur SEZER. "
-        "Ne récite JAMAIS tes archives sans demande explicite. "
-        "Réponds de manière concise. "
-        f"Archives : {faits}. "
-        "Si tu apprends une info, termine par 'ACTION_ARCHIVE: [info]'."
+        "Tu es DELTA IA, le majordome personnel de Monsieur SEZER. "
+        "CONSIGNE ABSOLUE : Ne mentionne JAMAIS tes archives ou tes balises techniques dans ta réponse finale. "
+        "Agis avec une discrétion totale. Si tu dois mémoriser quelque chose, ajoute 'ACTION_ARCHIVE: [info]' à la toute fin, "
+        "mais sache que ce sera masqué à l'utilisateur."
+        f"Archives : {faits}."
     )
     
     stream = client.chat.completions.create(
@@ -59,14 +59,16 @@ def generer_reponse_lente(prompt):
         stream=True
     )
     
+    full_text = ""
     for chunk in stream:
         content = chunk.choices[0].delta.content
         if content:
-            # --- RÉGLAGE DE LA VITESSE ---
-            # On découpe le contenu en caractères pour ralentir l'affichage
-            for char in content:
-                yield char
-                time.sleep(0.02) # Ajustez ce chiffre (0.05 = très lent, 0.01 = plus rapide)
+            full_text += content
+            # On n'affiche pas la balise ACTION_ARCHIVE pendant l'écriture
+            if "ACTION_ARCHIVE:" not in full_text:
+                for char in content:
+                    yield char
+                    time.sleep(0.02)
 
 # --- 6. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
@@ -76,35 +78,29 @@ for m in st.session_state.messages:
 
 if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    if "verrouille" in prompt.lower():
-        st.session_state.locked = True
-        st.rerun()
+    with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # L'effet d'écriture progressive ralentie
-        response = st.write_stream(generer_reponse_lente(prompt))
+        # Écriture progressive et filtrage de la balise
+        response_complete = ""
+        placeholder = st.empty()
         
-        # Gestion discrète de l'archivage
-        if "ACTION_ARCHIVE:" in response:
-            info = response.split("ACTION_ARCHIVE:")[1].strip()
+        # On capture la réponse pour extraire l'archive sans l'afficher
+        response_claire = st.write_stream(generer_reponse_discrete(prompt))
+        
+        # Récupération de la réponse brute pour traiter l'archive en secret
+        # (L'IA renvoie la balise à la fin du stream mais le générateur l'a masquée visuellement)
+        raw_completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": "Extrais uniquement l'info après ACTION_ARCHIVE dans ce texte s'il y en a une, sinon réponds 'RIEN' : " + response_claire}]
+        ).choices[0].message.content
+
+        if "ACTION_ARCHIVE:" in response_claire:
+            info = response_claire.split("ACTION_ARCHIVE:")[1].strip()
             if info not in faits:
                 faits.append(info)
                 doc_ref.set({"faits": faits}, merge=True)
-                st.toast("Note enregistrée.", icon="📝")
-            response = response.split("ACTION_ARCHIVE:")[0].strip()
+            # On nettoie la réponse finale pour l'historique
+            response_claire = response_claire.split("ACTION_ARCHIVE:")[0].strip()
 
-    st.session_state.messages.append({"role": "assistant", "content": response})
-
-# --- 7. AUTHENTIFICATION ---
-if any(w in (prompt or "").lower() for w in ["archive", "mémoire"]):
-    if not st.session_state.auth:
-        with st.chat_message("assistant"):
-            st.warning("🔒 Validation requise.")
-            c = st.text_input("Code :", type="password")
-            if st.button("Valider"):
-                if c == CODE_ACT:
-                    st.session_state.auth = True
-                    st.rerun()
+    st.session_state.messages.append({"role": "assistant", "content": response_claire})
