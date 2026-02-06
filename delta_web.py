@@ -7,7 +7,7 @@ import json
 import time
 import re
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONNEXION FIREBASE ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -20,14 +20,15 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. RÉCUPÉRATION ---
+# --- 2. RECUPÉRATION DES ARCHIVES ---
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA ZERO", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA ZERO</h1>", unsafe_allow_html=True)
 
+# Barre latérale (Sidebar)
 with st.sidebar:
     st.title("📂 Archives")
     if archives:
@@ -35,26 +36,22 @@ with st.sidebar:
             with st.expander(f"📁 {cat}"):
                 for i in items: st.write(f"• {i}")
     else:
-        st.info("Vide.")
+        st.info("Archives vides.")
 
+# Historique
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA paré, Monsieur Sezer. ⚡"}]
+    st.session_state.messages = []
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. LOGIQUE DIRECTE ---
-if prompt := st.chat_input("Ordre..."):
+# --- 4. MOTEUR DE TRAITEMENT ---
+if prompt := st.chat_input("Ordre : Ajoute... ou Renomme..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Analyse simplifiée à l'extrême
-    sys_prompt = (
-        "Tu es un robot JSON. Archives actuelles: " + str(list(archives.keys())) + ". "
-        "Si l'user veut AJOUTER: {'action': 'add', 'cat': 'nom', 'val': 'texte'}. "
-        "Si l'user veut RENOMMER dossier: {'action': 'rename', 'old': 'nom', 'new': 'nom'}. "
-        "Sinon: {'action': 'none'}."
-    )
+    # Analyse JSON ultra-courte
+    sys_prompt = f"Archives : {list(archives.keys())}. Réponds en JSON : {{'action':'add', 'cat':'nom', 'val':'texte'}} ou {{'action':'rename', 'old':'nom', 'new':'nom'}}. Sinon {{'action':'none'}}"
     
     try:
         check = client.chat.completions.create(
@@ -62,42 +59,42 @@ if prompt := st.chat_input("Ordre..."):
             messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
             temperature=0
         )
-        # Extraction chirurgicale
-        txt_res = check.choices[0].message.content
-        match = re.search(r'\{.*\}', txt_res, re.DOTALL)
         
+        # Extraction du JSON
+        match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
         if match:
             data = json.loads(match.group(0).replace("'", '"'))
             action = data.get('action')
-            m = False
+            modif = False
 
             if action == 'add':
                 c, v = data.get('cat', 'Général'), data.get('val')
                 if v:
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
-                    m = True
+                    modif = True
+            
             elif action == 'rename':
                 o, n = data.get('old'), data.get('new')
                 if o in archives:
                     archives[n] = archives.pop(o)
-                    m = True
+                    modif = True
 
-            if m:
+            if modif:
                 doc_ref.set({"archives": archives})
-                st.rerun() # Rafraîchissement immédiat de la barre latérale
-    except: pass
+                st.toast("✅ Base mise à jour")
+                time.sleep(0.5)
+                st.rerun()
+    except:
+        pass
 
-    # B. RÉPONSE
+    # Réponse de DELTA
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA. Voici tes archives : {str(archives)}. Réponds brièvement à Monsieur Sezer."
-        try:
-            resp = client.chat.completions.create(
-                model="llama-3.3-70b-versatile", 
-                messages=[{"role": "system", "content": instr}] + st.session_state.messages
-            )
-            final = resp.choices[0].message.content
-        except: final = "Mise à jour effectuée. ⚡"
-        
+        instr = f"Tu es DELTA. Archives : {archives}. Réponds brièvement à Monsieur Sezer."
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile", 
+            messages=[{"role": "system", "content": instr}] + st.session_state.messages
+        )
+        final = resp.choices[0].message.content
         st.markdown(final)
         st.session_state.messages.append({"role": "assistant", "content": final})
