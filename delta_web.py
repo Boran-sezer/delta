@@ -20,9 +20,14 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. RÉCUPÉRATION DES DONNÉES ---
+# --- 2. RÉCUPÉRATION IMMÉDIATE DES DONNÉES ---
+# Cette partie s'exécute à CHAQUE chargement/rafraîchissement
 res = doc_ref.get()
-archives = res.to_dict().get("archives", {}) if res.exists else {}
+if res.exists:
+    archives = res.to_dict().get("archives", {})
+else:
+    archives = {}
+    doc_ref.set({"archives": {}}) # Crée le document s'il n'existe pas
 
 # --- 3. INTERFACE ---
 st.set_page_config(page_title="DELTA AI", layout="wide")
@@ -31,56 +36,48 @@ st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_ht
 if "messages" not in st.session_state: 
     st.session_state.messages = []
 
-# Affichage de l'historique
+# Affichage de l'historique de session
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. ANALYSE ET ARCHIVAGE AUTOMATIQUE ---
+# --- 4. ANALYSE ET ARCHIVAGE ---
 if prompt := st.chat_input("Message pour DELTA..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # L'unité d'analyse décide si l'info doit être mémorisée
+    # L'unité d'analyse utilise les archives chargées à l'ouverture
     sys_analyse = (
-        f"Tu es l'unité de mémoire de DELTA. Voici les archives : {archives}. "
-        f"Monsieur Sezer Boran dit : '{prompt}'. "
-        "Si ce message contient une info importante (préférence, nom, projet, fait), "
-        "réponds UNIQUEMENT en JSON : {'action':'add', 'cat':'NOM_CATEGORIE', 'val':'INFO'}. "
-        "Sinon réponds {'action':'none'}."
+        f"Archives chargées : {archives}. "
+        f"Monsieur Sezer Boran : '{prompt}'. "
+        "Si info cruciale, JSON : {'action':'add', 'cat':'NOM', 'val':'INFO'}. Sinon {'action':'none'}."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Archiviste autonome et intelligent."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Archiviste."}, {"role": "user", "content": sys_analyse}],
             temperature=0
         )
-        
-        # Extraction du JSON
         match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
         if match:
             data = json.loads(match.group(0).replace("'", '"'))
             if data.get('action') == 'add':
-                c, v = data.get('cat', 'Général'), data.get('val')
-                # On ajoute seulement si c'est nouveau
+                c, v = data.get('cat', 'Mémoire'), data.get('val')
                 if v and v not in archives.get(c, []):
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
-                    # Mise à jour Firebase immédiate
-                    doc_ref.set({"archives": archives})
-                    st.toast(f"💾 Mémoire mise à jour : {c}")
-                    time.sleep(0.1)
-    except Exception as e:
-        pass # Erreur silencieuse pour ne pas perturber l'utilisateur
+                    doc_ref.set({"archives": archives}) # Sauvegarde temps réel
+                    st.toast(f"💾 Archivé dans : {c}")
+    except: pass
 
-    # --- 5. RÉPONSE AVEC EFFET DE FRAPPE (STREAMING) ---
+    # --- 5. RÉPONSE (DELTA connaît déjà tout sur vous ici) ---
     with st.chat_message("assistant"):
         instruction_delta = (
             f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
-            f"Utilise ces archives si besoin : {archives}. "
-            "Sois extrêmement concis et efficace. Pas de phrases automatiques."
+            f"IDENTITÉ ET PRÉFÉRENCES (Archives) : {archives}. "
+            "Sois bref. Ne réponds jamais 'système opérationnel'."
         )
         
         placeholder = st.empty()
@@ -93,7 +90,6 @@ if prompt := st.chat_input("Message pour DELTA..."):
                 temperature=0.3,
                 stream=True
             )
-            
             for chunk in stream:
                 if chunk.choices[0].delta.content:
                     full_response += chunk.choices[0].delta.content
@@ -103,14 +99,11 @@ if prompt := st.chat_input("Message pour DELTA..."):
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
         except Exception:
-            # Secours sans "Système opérationnel"
-            try:
-                resp = client.chat.completions.create(
-                    model="llama-3.1-8b-instant", 
-                    messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages
-                )
-                full_response = resp.choices[0].message.content
-                placeholder.markdown(full_response)
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
-            except:
-                st.error("Lien perdu avec le noyau.")
+            # Secours intelligent
+            resp = client.chat.completions.create(
+                model="llama-3.1-8b-instant", 
+                messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages
+            )
+            full_response = resp.choices[0].message.content
+            placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
