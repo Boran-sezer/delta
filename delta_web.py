@@ -41,14 +41,18 @@ if st.session_state.locked:
         st.rerun()
     st.stop()
 
-# --- 5. FONCTION DE RÉPONSE ---
+# --- 5. FONCTION DE RÉPONSE ET GESTION MÉMOIRE ---
 def reponse_delta(prompt, special_instr=None):
-    instr = special_instr if special_instr else f"Tu es DELTA, majordome de Monsieur SEZER. Ultra-concis. Archives : {faits}. Si info apprise: ACTION_ARCHIVE: [info]"
+    instr = special_instr if special_instr else (
+        f"Tu es DELTA, majordome de Monsieur SEZER. Ultra-concis. "
+        f"Archives : {faits}. "
+        "Si on te demande de supprimer une info, réponds par 'ACTION_DELETE: [texte précis à supprimer]'."
+        "Si tu apprends une info : 'ACTION_ARCHIVE: [info]'."
+    )
     
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_raw, displayed = "", ""
-        
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": instr}] + st.session_state.messages,
@@ -59,60 +63,60 @@ def reponse_delta(prompt, special_instr=None):
             content = chunk.choices[0].delta.content
             if content:
                 full_raw += content
-                if "ACTION_ARCHIVE" in full_raw: break
+                if "ACTION_" in full_raw: break
                 for char in content:
                     displayed += char
                     placeholder.markdown(displayed + "▌")
                     time.sleep(0.01)
         
-        clean = full_raw.split("ACTION_ARCHIVE")[0].strip()
+        # --- TRAITEMENT DES ACTIONS ---
+        clean = full_raw.split("ACTION_")[0].strip()
         placeholder.markdown(clean)
-        st.session_state.messages.append({"role": "assistant", "content": clean})
         
-        # Archivage silencieux
+        # SUPPRESSION
+        if "ACTION_DELETE:" in full_raw:
+            cible = full_raw.split("ACTION_DELETE:")[1].strip().lower()
+            nouveaux_faits = [f for f in faits if cible not in f.lower()]
+            doc_ref.set({"faits": nouveaux_faits}, merge=True)
+            st.toast("Information supprimée.")
+            time.sleep(1)
+            st.rerun()
+
+        # ARCHIVAGE
         if "ACTION_ARCHIVE:" in full_raw:
             info = full_raw.split("ACTION_ARCHIVE:")[1].strip()
             if info not in faits:
                 faits.append(info)
                 doc_ref.set({"faits": faits}, merge=True)
+                st.toast("Info mémorisée.")
+
+        st.session_state.messages.append({"role": "assistant", "content": clean})
 
 # --- 6. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
-
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# Si une authentification est en cours
 if st.session_state.ask_auth:
     with st.chat_message("assistant"):
         st.warning("🔒 Identification requise.")
-        code_input = st.text_input("CODE :", type="password")
-        if st.button("CONFIRMER"):
-            if code_input == CODE_ACT:
+        if st.text_input("CODE :", type="password") == CODE_ACT:
+            if st.button("CONFIRMER"):
                 st.session_state.ask_auth = False
-                # On déclenche l'affichage immédiatement
-                reponse_delta("Affiche les archives", special_instr=f"Tu es DELTA. Liste les archives suivantes sans blabla : {faits}")
+                reponse_delta("Affiche les archives", f"Liste les archives : {faits}")
                 st.rerun()
-            else:
-                st.error("Code erroné.")
     st.stop()
 
-# Saisie standard
 if prompt := st.chat_input("Ordres ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    st.rerun()
-
-# Logique de traitement après envoi du message
-if st.session_state.messages[-1]["role"] == "user":
-    last_prompt = st.session_state.messages[-1]["content"].lower()
+    p_low = prompt.lower()
     
-    if "verrouille" in last_prompt:
+    if "verrouille" in p_low:
         st.session_state.locked = True
         st.rerun()
-    
-    if any(w in last_prompt for w in ["archive", "mémoire"]):
+    elif any(w in p_low for w in ["archive", "mémoire"]):
         st.session_state.ask_auth = True
         st.rerun()
     else:
-        reponse_delta(last_prompt)
+        reponse_delta(prompt)
         st.rerun()
