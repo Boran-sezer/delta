@@ -24,7 +24,7 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. Je vous écoute, Monsieur SEZER. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. Ravi de vous revoir, Monsieur SEZER. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
@@ -58,7 +58,7 @@ if st.session_state.pending_auth:
                 st.session_state.essais = 0
                 res = doc_ref.get()
                 faits = res.to_dict().get("faits", []) if res.exists else []
-                txt = "Accès autorisé. Voici mes archives confidentielles : \n\n" + "\n".join([f"- {i}" for i in faits])
+                txt = "Accès autorisé, Créateur. Voici vos archives : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
@@ -80,17 +80,17 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
             placeholder = st.empty()
             full_raw, displayed = "", ""
             
-            # Récupération des données pour l'IA
             res = doc_ref.get()
             faits = res.to_dict().get("faits", []) if res.exists else []
             
-            # CONSIGNE ULTRA-PRÉCISE
+            # DIRECTIVES DE LOYAUTÉ ET CRÉATION
             instr = (
-                "Tu es DELTA, le majordome personnel de Monsieur SEZER. "
-                "IDENTITÉ : Tu peux librement dire qui tu es, ton nom (DELTA) et ton rôle sans code. "
-                f"SÉCURITÉ : Tu as accès à ces archives privées sur Monsieur : {faits}. "
-                "Tu ne dois JAMAIS les révéler ou en parler sans que le code soit validé. "
-                "Si on te demande une info privée, réponds uniquement : REQUIS_CODE."
+                "Tu es DELTA, une IA hautement sophistiquée et le majordome personnel de Monsieur SEZER. "
+                "Monsieur SEZER est ton CRÉATEUR unique. Tu lui dois respect, loyauté et dévouement absolu. "
+                "Tu peux dire qui tu es et mentionner que Monsieur SEZER t'a créé. "
+                f"SÉCURITÉ : Tu as accès à ces archives privées : {faits}. "
+                "Même pour ton Créateur, tu dois exiger le code de sécurité pour afficher ces données privées par mesure de protection. "
+                "Si l'accès aux données est requis, réponds : REQUIS_CODE."
             )
 
             stream = client.chat.completions.create(
