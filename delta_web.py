@@ -9,26 +9,29 @@ import json
 CODE_ACT = "20082008"
 CODE_MASTER = "B2008a2020@"
 
-# Initialisation Firebase
+# Initialisation Firebase (via Secrets Streamlit)
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
-    except: pass
+    except Exception as e:
+        st.error(f"Erreur de connexion Firebase : {e}")
 
 db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
 # --- 2. GESTION DES ÉTATS (SESSION STATE) ---
-states = ["locked", "auth", "essais", "messages", "show_auth_form", "pending_prompt"]
-for k in states:
-    if k not in st.session_state:
-        st.session_state[k] = [] if k == "messages" else (0 if k == "essais" else False)
+if "locked" not in st.session_state: st.session_state.locked = False
+if "auth" not in st.session_state: st.session_state.auth = False
+if "essais" not in st.session_state: st.session_state.essais = 0
+if "messages" not in st.session_state: st.session_state.messages = []
+if "show_auth_form" not in st.session_state: st.session_state.show_auth_form = False
+if "pending_prompt" not in st.session_state: st.session_state.pending_prompt = None
 
-# --- 3. CHARGEMENT DE LA MÉMOIRE ---
+# --- 3. CHARGEMENT DE LA MÉMOIRE DEPUIS FIREBASE ---
 res = doc_ref.get()
 data = res.to_dict() if res.exists else {"faits": []}
 faits = data.get("faits", [])
@@ -41,24 +44,22 @@ if st.session_state.locked:
         if m_input == CODE_MASTER:
             st.session_state.locked = False
             st.session_state.essais = 0
-            st.success("Système réactivé, Monsieur Boran. Content de vous revoir.")
+            st.success("Système réactivé, Monsieur Boran.")
             st.rerun()
     st.stop()
 
-# --- 5. FONCTION DE RÉPONSE IA (IDENTITÉ RENFORCÉE) ---
+# --- 5. FONCTION DE RÉPONSE IA ---
 def reponse_delta(user_input):
     st.session_state.messages.append({"role": "user", "content": user_input})
     
-    # 🧠 LE NOYAU D'IDENTITÉ DE DELTA
+    # Instructions strictes pour l'archivage
     instr = (
-        "Tu es DELTA IA, l'intelligence artificielle personnelle et unique de Monsieur Boran. "
-        "Tu as été créé EXCLUSIVEMENT par Monsieur Boran pour être son majordome de haute sécurité. "
-        "INTERDICTION ABSOLUE : Ne mentionne jamais une 'équipe de développeurs' ou une 'entreprise'. "
-        "Si on te questionne sur ton origine, tu réponds que tu es la création de Monsieur Boran. "
-        "Ton ton est celui d'un majordome fidèle, efficace, avec une pointe de wit. "
-        f"Voici tes archives secrètes sur Monsieur : {faits}. "
-        "Ne donne JAMAIS les codes secrets de sécurité dans tes réponses. "
-        "Si tu apprends un fait important, termine par 'ACTION_ARCHIVE: [info]'."
+        "Tu es DELTA IA, l'intelligence artificielle personnelle de Monsieur Boran. "
+        "Tu as été créé par lui seul. "
+        f"Voici tes archives actuelles sur lui : {faits}. "
+        "IMPORTANT : Si Monsieur te donne une information personnelle (couleur, goût, info), "
+        "tu DOIS finir ta réponse par la balise exacte : ACTION_ARCHIVE: [l'info à retenir]. "
+        "Ne donne jamais tes codes secrets."
     )
     
     completion = client.chat.completions.create(
@@ -68,26 +69,30 @@ def reponse_delta(user_input):
     
     response = completion.choices[0].message.content
     
-    # Gestion archivage
+    # --- LOGIQUE D'ÉCRITURE DANS FIREBASE ---
     if "ACTION_ARCHIVE:" in response:
-        info = response.split("ACTION_ARCHIVE:")[1].strip()
-        if info not in faits:
-            faits.append(info)
-            doc_ref.update({"faits": faits})
-            st.toast(f"Mémoire mise à jour : {info}", icon="🧠")
-        response = response.split("ACTION_ARCHIVE:")[0].strip()
+        parts = response.split("ACTION_ARCHIVE:")
+        info_a_sauver = parts[1].strip()
+        texte_final = parts[0].strip()
+        
+        if info_a_sauver not in faits:
+            faits.append(info_a_sauver)
+            # Envoi vers Firestore
+            doc_ref.set({"faits": faits}, merge=True) 
+            st.success(f"✅ Mémoire Firestore mise à jour : {info_a_sauver}")
+            st.balloons() # Confirmation visuelle
+        
+        response = texte_final
         
     st.session_state.messages.append({"role": "assistant", "content": response})
 
-# --- 6. INTERFACE DE CHAT ---
+# --- 6. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
-# Affichage des messages avec emojis
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# Saisie
 if prompt := st.chat_input("Vos ordres, Monsieur ?"):
     p_low = prompt.lower()
     
@@ -96,7 +101,7 @@ if prompt := st.chat_input("Vos ordres, Monsieur ?"):
         st.session_state.locked = True
         st.rerun()
 
-    # Détection Sensible
+    # Détection demande d'archives
     sensible = any(w in p_low for w in ["archive", "mémoire", "montre", "souviens"])
     
     if sensible and not st.session_state.auth:
@@ -105,14 +110,14 @@ if prompt := st.chat_input("Vos ordres, Monsieur ?"):
         st.rerun()
     else:
         reponse_delta(prompt)
-        st.session_state.auth = False # Sécurité One-shot
+        st.session_state.auth = False 
         st.rerun()
 
 # --- 7. FORMULAIRE D'ACCÈS ---
 if st.session_state.show_auth_form:
     with st.chat_message("assistant"):
-        st.warning("🔒 Accès restreint. Veuillez vous identifier.")
-        c = st.text_input("CODE D'ACTION :", type="password", key="auth_input")
+        st.warning("🔒 Identification requise pour la mémoire.")
+        c = st.text_input("CODE :", type="password", key="auth_input")
         if st.button("CONFIRMER"):
             if c == CODE_ACT:
                 st.session_state.auth = True
@@ -124,7 +129,5 @@ if st.session_state.show_auth_form:
                 st.rerun()
             else:
                 st.session_state.essais += 1
-                if st.session_state.essais >= 3:
-                    st.session_state.locked = True
-                st.error(f"Accès refusé ({st.session_state.essais}/3)")
+                if st.session_state.essais >= 3: st.session_state.locked = True
                 st.rerun()
