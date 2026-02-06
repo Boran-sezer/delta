@@ -20,22 +20,27 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. RECUPÉRATION ---
+# --- 2. RECUPÉRATION DES ARCHIVES ---
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
-# --- 3. INTERFACE ---
+# --- 3. INTERFACE ÉPURÉE (SANS SIDEBAR) ---
 st.set_page_config(page_title="DELTA AI", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : Noyau Épuré</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.title("📂 Mémoire")
+# Archives intégrées dans la page principale au lieu de la barre latérale
+with st.expander("📁 ACCÉDER AUX ARCHIVES MÉMOIRE"):
     if archives:
-        for cat, items in archives.items():
-            with st.expander(f"📁 {cat}"):
-                for i in items: st.write(f"• {i}")
+        cols = st.columns(len(archives) if len(archives) > 0 else 1)
+        for idx, (cat, items) in enumerate(archives.items()):
+            with cols[idx % len(cols)]:
+                st.markdown(f"**{cat}**")
+                for i in items:
+                    st.write(f"• {i}")
     else:
-        st.info("Vide.")
+        st.info("Aucune donnée mémorisée.")
+
+st.divider()
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -43,14 +48,14 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. ANALYSE ET FILTRAGE ULTRA-STRICT ---
-if prompt := st.chat_input("Ordres..."):
+# --- 4. ANALYSE ET FILTRAGE AUTO ---
+if prompt := st.chat_input("Ordres pour DELTA..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
     sys_analyse = (
         f"Archives : {archives}. "
-        "Tu es l'analyseur de DELTA. Ne garde QUE l'essentiel. "
+        "Analyseur DELTA. Ne garde que le crucial. "
         "Réponds UNIQUEMENT en JSON : {'action':'add', 'cat':'NOM', 'val':'INFO'} ou {'action':'none'}"
     )
     
@@ -64,31 +69,28 @@ if prompt := st.chat_input("Ordres..."):
         if match:
             data = json.loads(match.group(0).replace("'", '"'))
             if data.get('action') == 'add':
-                c, v = data.get('cat', 'Identité'), data.get('val')
+                c, v = data.get('cat', 'Général'), data.get('val')
                 if v and v not in archives.get(c, []):
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
                     doc_ref.set({"archives": archives})
-                    st.toast("💾 Mémorisé.")
+                    st.toast("💾 Système mis à jour.")
                     time.sleep(0.3)
                     st.rerun()
     except: pass
 
-    # --- 5. RÉPONSE : CONCISION ET RESPECT DU CRÉATEUR ---
+    # --- 5. RÉPONSE CONCISE ---
     with st.chat_message("assistant"):
-        # On définit ici le ton froid, efficace et respectueux
         instruction_delta = (
-            f"Tu es DELTA, IA de sécurité et d'assistance. Créateur : Monsieur Sezer Boran. "
-            f"Données actuelles : {archives}. "
-            "DIRECTIVES : 1. Sois extrêmement concis. 2. Pas de bavardage inutile. "
-            "3. Ne dis jamais 'probablement', tu sais qui est ton Créateur. "
-            "4. Utilise un ton technique et efficace."
+            f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
+            f"Données : {archives}. "
+            "DIRECTIVES : Sois extrêmement concis. Pas de bavardage. Ton technique."
         )
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
                 messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
-                temperature=0.3 # Plus bas pour moins de "bla-bla"
+                temperature=0.3
             )
             final = resp.choices[0].message.content
         except:
