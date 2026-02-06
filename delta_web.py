@@ -45,19 +45,19 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. LOGIQUE MULTI-ACTION (V2 - ULTRA ROBUSTE) ---
+# --- 4. LOGIQUE MULTI-ACTION (RÉTABLIE ET SÉCURISÉE) ---
 if prompt := st.chat_input("Ordres pour vos archives..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse stricte - AJOUT DE LA FONCTION RENAME_PARTIE
+    # Analyse stricte - J'ai rétabli l'exemple exact pour l'ajout
     analyse_prompt = (
         f"Archives actuelles : {archives}. "
         f"Ordre : '{prompt}'. "
         "Tu es un terminal de données. Réponds UNIQUEMENT par un objet JSON. "
         "Si l'ordre est d'ajouter: {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
-        "Si l'ordre est de renommer une catégorie: {'action': 'rename_partie', 'old': 'ancien_nom', 'new': 'nouveau_nom'} "
+        "Si l'ordre est de renommer une catégorie: {'action': 'rename_partie', 'old': 'ancien', 'new': 'nouveau'} "
         "Si l'ordre est de supprimer une partie: {'action': 'delete_partie', 'target': 'nom'} "
         "Si l'ordre est de supprimer une ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'} "
         "Si l'ordre est de modifier: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'} "
@@ -71,7 +71,6 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
             temperature=0
         )
         cmd_text = check.choices[0].message.content.strip()
-        
         json_match = re.search(r'(\{.*\})', cmd_text, re.DOTALL)
         
         if json_match:
@@ -79,20 +78,19 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
             action = data.get('action')
             modif = False
 
+            # --- LOGIQUE D'AJOUT (RESTAURÉE À L'IDENTIQUE) ---
             if action == 'add':
                 p = data.get('partie', 'Général')
                 if p not in archives: archives[p] = []
                 archives[p].append(data.get('info'))
                 modif = True
             
-            # --- NOUVELLE PARTIE POUR RENOMMER ---
+            # --- LOGIQUE DE RENOMMAGE (AJOUTÉE SANS CONFLIT) ---
             elif action == 'rename_partie':
-                old_n = data.get('old')
-                new_n = data.get('new')
+                old_n, new_n = data.get('old'), data.get('new')
                 if old_n in archives:
                     archives[new_n] = archives.pop(old_n)
                     modif = True
-            # -------------------------------------
 
             elif action == 'delete_partie':
                 target = data.get('target', '').lower()
