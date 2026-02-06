@@ -28,7 +28,6 @@ archives = res.to_dict().get("archives", {}) if res.exists else {}
 st.set_page_config(page_title="DELTA ZERO", layout="wide")
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA ZERO</h1>", unsafe_allow_html=True)
 
-# Barre latérale (Sidebar)
 with st.sidebar:
     st.title("📂 Archives")
     if archives:
@@ -38,20 +37,26 @@ with st.sidebar:
     else:
         st.info("Archives vides.")
 
-# Historique
 if "messages" not in st.session_state: 
     st.session_state.messages = []
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. MOTEUR DE TRAITEMENT ---
-if prompt := st.chat_input("Ordre : Ajoute... ou Renomme..."):
+# --- 4. MOTEUR DE TRAITEMENT (AVEC SUPPRESSION) ---
+if prompt := st.chat_input("Ordre : Ajoute, Renomme ou Supprime..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Analyse JSON ultra-courte
-    sys_prompt = f"Archives : {list(archives.keys())}. Réponds en JSON : {{'action':'add', 'cat':'nom', 'val':'texte'}} ou {{'action':'rename', 'old':'nom', 'new':'nom'}}. Sinon {{'action':'none'}}"
+    sys_prompt = (
+        f"Archives : {archives}. "
+        "Réponds UNIQUEMENT en JSON : "
+        "{'action':'add', 'cat':'nom', 'val':'texte'} "
+        "{'action':'rename', 'old':'nom', 'new':'nom'} "
+        "{'action':'delete_cat', 'cat':'nom'} (pour un dossier) "
+        "{'action':'delete_val', 'cat':'nom', 'val':'texte'} (pour une ligne) "
+        "Sinon {'action':'none'}"
+    )
     
     try:
         check = client.chat.completions.create(
@@ -60,13 +65,13 @@ if prompt := st.chat_input("Ordre : Ajoute... ou Renomme..."):
             temperature=0
         )
         
-        # Extraction du JSON
         match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
         if match:
             data = json.loads(match.group(0).replace("'", '"'))
             action = data.get('action')
             modif = False
 
+            # AJOUT
             if action == 'add':
                 c, v = data.get('cat', 'Général'), data.get('val')
                 if v:
@@ -74,21 +79,35 @@ if prompt := st.chat_input("Ordre : Ajoute... ou Renomme..."):
                     archives[c].append(v)
                     modif = True
             
+            # RENOMMAGE
             elif action == 'rename':
                 o, n = data.get('old'), data.get('new')
                 if o in archives:
                     archives[n] = archives.pop(o)
                     modif = True
 
+            # SUPPRIMER DOSSIER
+            elif action == 'delete_cat':
+                c = data.get('cat')
+                if c in archives:
+                    del archives[c]
+                    modif = True
+
+            # SUPPRIMER LIGNE PRÉCISE
+            elif action == 'delete_val':
+                c, v = data.get('cat'), data.get('val')
+                if c in archives and v in archives[c]:
+                    archives[c].remove(v)
+                    modif = True
+
             if modif:
                 doc_ref.set({"archives": archives})
-                st.toast("✅ Base mise à jour")
+                st.toast("🗑️ Mise à jour des archives effectuée")
                 time.sleep(0.5)
                 st.rerun()
-    except:
-        pass
+    except: pass
 
-    # Réponse de DELTA
+    # RÉPONSE DE DELTA
     with st.chat_message("assistant"):
         instr = f"Tu es DELTA. Archives : {archives}. Réponds brièvement à Monsieur Sezer."
         resp = client.chat.completions.create(
