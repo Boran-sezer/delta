@@ -25,75 +25,86 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA AI", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : Intelligence Sélective</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.title("📂 Archives de Monsieur Sezer")
     if archives:
-        for partie, infos in archives.items():
-            with st.expander(f"📁 {partie}"):
-                for i in infos: st.write(f"• {i}")
+        for cat, items in archives.items():
+            with st.expander(f"📁 {cat}"):
+                for i in items: st.write(f"• {i}")
     else:
-        st.info("Aucune archive.")
+        st.info("Archives vides.")
 
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Je suis paré, Monsieur Sezer. Je serai plus sélectif sur l'archivage désormais. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA paré, Monsieur Sezer. ⚡"}]
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. LOGIQUE D'ARCHIVAGE INTELLIGENTE ---
-if prompt := st.chat_input("Votre message..."):
+# --- 4. LE CERVEAU (LOGIQUE DE DÉCISION) ---
+if prompt := st.chat_input("Ordre ou message..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Le filtre strict : on demande à l'IA d'être critique
-    analyse_auto = (
-        f"Dossiers existants : {list(archives.keys())}. "
+    # Analyse simplifiée mais ultra-puissante
+    analyse_prompt = (
+        f"Archives : {list(archives.keys())}. "
         f"Message : '{prompt}'. "
-        "Tu es un filtre de données. ARCHIVE UNIQUEMENT SI c'est une info factuelle (nom, projet, date, préférence). "
-        "Ignore les 'bonjour', les questions, ou le bavardage. "
-        "Si pertinent, réponds en JSON : {'action': 'save', 'cat': 'nom_logique', 'info': 'texte_court'}. "
-        "Sinon réponds 'NON'."
+        "Réponds UNIQUEMENT par un JSON : "
+        "- Si RENOMMER catégorie: {'action': 'rename', 'old': 'nom', 'new': 'nom'} "
+        "- Si AJOUTER/ARCHIVER : {'action': 'add', 'cat': 'nom', 'val': 'texte'} "
+        "- Si SUPPRIMER catégorie: {'action': 'delete', 'cat': 'nom'} "
+        "- Sinon: {'action': 'none'}"
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un archiviste minimaliste."}, {"role": "user", "content": analyse_auto}],
+            messages=[{"role": "system", "content": "Tu es un terminal JSON strict."}, {"role": "user", "content": analyse_prompt}],
             temperature=0
         )
-        cmd_text = check.choices[0].message.content.strip()
-        json_match = re.search(r'(\{.*\})', cmd_text, re.DOTALL)
-        
-        if json_match:
-            data = json.loads(json_match.group(1).replace("'", '"'))
-            if data.get('action') == 'save':
-                cat = data.get('cat', 'Divers')
-                # On évite de dupliquer si l'info existe déjà
-                if data.get('info') not in archives.get(cat, []):
-                    if cat not in archives: archives[cat] = []
-                    archives[cat].append(data.get('info'))
-                    doc_ref.set({"archives": archives})
-                    st.toast(f"💾 Noté dans {cat}")
-                    time.sleep(0.2)
-                    st.rerun()
+        data = json.loads(re.search(r'\{.*\}', check.choices[0].message.content).group(0).replace("'", '"'))
+        action = data.get('action')
+        modif = False
+
+        if action == 'rename':
+            o, n = data.get('old'), data.get('new')
+            if o in archives:
+                archives[n] = archives.pop(o)
+                modif = True
+        elif action == 'add':
+            c, v = data.get('cat', 'Général'), data.get('val')
+            if v and v not in archives.get(c, []):
+                if c not in archives: archives[c] = []
+                archives[c].append(v)
+                modif = True
+        elif action == 'delete':
+            c = data.get('cat')
+            if c in archives:
+                del archives[c]
+                modif = True
+
+        if modif:
+            doc_ref.set({"archives": archives})
+            st.toast("✅ Base mise à jour")
+            time.sleep(0.4)
+            st.rerun()
     except: pass
 
-    # B. RÉPONSE AVEC MÉMOIRE
+    # B. RÉPONSE (AVEC LES ARCHIVES EN MÉMOIRE)
     with st.chat_message("assistant"):
-        mem_str = "\n".join([f"- {c}: {', '.join(v)}" for c, v in archives.items()])
-        instr = f"Tu es DELTA, créé par Monsieur Sezer. Voici tes archives : {mem_str}. Utilise-les pour répondre. Sois bref."
-        
+        # On donne TOUTES les archives à l'IA pour qu'elle sache de quoi elle parle
+        mem_context = "Tu connais ces infos sur Monsieur Sezer : " + str(archives)
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
-                messages=[{"role": "system", "content": instr}] + st.session_state.messages
+                messages=[{"role": "system", "content": f"Tu es DELTA. {mem_context}. Sois bref et précis."}] + st.session_state.messages
             )
-            full_res = resp.choices[0].message.content
+            txt = resp.choices[0].message.content
         except:
-            full_res = "Je reste à votre écoute, Monsieur Sezer. ⚡"
+            txt = "Mise à jour effectuée, Monsieur Sezer. ⚡"
         
-        st.markdown(full_res)
-        st.session_state.messages.append({"role": "assistant", "content": full_res})
+        st.markdown(txt)
+        st.session_state.messages.append({"role": "assistant", "content": txt})
