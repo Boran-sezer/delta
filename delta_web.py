@@ -22,12 +22,12 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. ÉTATS ---
+# --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
     st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "ask_auth" not in st.session_state: st.session_state.ask_auth = False
-if "temp_prompt" not in st.session_state: st.session_state.temp_prompt = None
+if "target_prompt" not in st.session_state: st.session_state.target_prompt = None
 
 # --- 3. CHARGEMENT MÉMOIRE ---
 res = doc_ref.get()
@@ -42,16 +42,16 @@ if st.session_state.locked:
         st.rerun()
     st.stop()
 
-# --- 5. LOGIQUE DE RÉPONSE ---
+# --- 5. FONCTION DE RÉPONSE ---
 def reponse_delta(prompt, mode="normal"):
     if mode == "archives":
-        instr = f"Tu es DELTA. Liste ces archives de Monsieur SEZER sans aucun blabla : {faits}."
+        instr = f"Tu es DELTA. Liste ces informations de manière brute et courte : {faits}."
     else:
         instr = (
             f"Tu es DELTA, majordome de Monsieur SEZER. Sois ultra-concis. "
-            f"Archives actuelles : {faits}. "
-            "Si Monsieur demande de supprimer une info, réponds : 'ACTION_DELETE: [mot-clé]'."
-            "Si Monsieur donne une nouvelle info, réponds : 'ACTION_ARCHIVE: [info]'."
+            f"Archives : {faits}. "
+            "Si Monsieur demande de supprimer, réponds : 'ACTION_DELETE: [mot]'."
+            "Sinon : 'ACTION_ARCHIVE: [info]'."
         )
 
     with st.chat_message("assistant"):
@@ -75,18 +75,16 @@ def reponse_delta(prompt, mode="normal"):
         
         clean = full_raw.split("ACTION_")[0].strip()
         if not clean and "ACTION_DELETE" in full_raw:
-            clean = "C'est fait, Monsieur SEZER. J'ai effacé cela de ma mémoire."
+            clean = "Mémoire mise à jour, Monsieur SEZER."
         
         placeholder.markdown(clean)
         st.session_state.messages.append({"role": "assistant", "content": clean})
 
-        # --- ACTIONS FIREBASE ---
+        # ACTIONS SUR LA BASE DE DONNÉES
         if "ACTION_DELETE:" in full_raw:
             cible = full_raw.split("ACTION_DELETE:")[1].strip().lower()
             nouveaux_faits = [f for f in faits if cible not in f.lower()]
             doc_ref.set({"faits": nouveaux_faits}, merge=True)
-            st.toast("Suppression effectuée.")
-            time.sleep(1)
             st.rerun()
 
         if "ACTION_ARCHIVE:" in full_raw:
@@ -94,7 +92,6 @@ def reponse_delta(prompt, mode="normal"):
             if info not in faits:
                 faits.append(info)
                 doc_ref.set({"faits": faits}, merge=True)
-                st.toast("Mémorisé.")
 
 # --- 6. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
@@ -102,36 +99,37 @@ st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# Gestion du formulaire de code
+# FORMULAIRE DE SÉCURITÉ (Bloque tout affichage mémoire)
 if st.session_state.ask_auth:
     with st.chat_message("assistant"):
-        st.warning("🔒 Accès à la mémoire requis.")
-        code = st.text_input("CODE :", type="password", key="auth_field")
+        st.warning("🔒 Accès restreint. Identifiez-vous.")
+        code = st.text_input("CODE :", type="password", key="auth_key")
         if st.button("VALIDER"):
             if code == CODE_ACT:
                 st.session_state.ask_auth = False
-                reponse_delta("Affichage mémoire", mode="archives")
+                reponse_delta("Affichage", mode="archives")
                 st.rerun()
             else:
-                st.error("Code incorrect.")
+                st.error("Accès refusé.")
     st.stop()
 
-# Saisie utilisateur
-if prompt := st.chat_input("Ordres ?"):
+# ENTRÉE UTILISATEUR
+if prompt := st.chat_input("Vos ordres ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     p_low = prompt.lower()
     
-    # 1. Verrouillage
+    # 1. Vérification Verrouillage
     if "verrouille" in p_low:
         st.session_state.locked = True
         st.rerun()
     
-    # 2. Sécurité : On bloque TOUT ce qui touche à la mémoire/archives
-    elif any(w in p_low for w in ["mémoire", "archive", "souviens", "faits", "notes"]):
+    # 2. Vérification Sécurité Mémoire (SCAN TOTAL)
+    mots_interdits = ["mémoire", "archive", "souviens", "faits", "notes", "qu'est-ce que tu sais"]
+    if any(w in p_low for w in mots_interdits):
         st.session_state.ask_auth = True
         st.rerun()
     
-    # 3. Actions normales
+    # 3. Traitement normal (inclut suppression)
     else:
         reponse_delta(prompt)
         st.rerun()
