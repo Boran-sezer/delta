@@ -22,7 +22,7 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA paré, Monsieur Sezer. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA optimisé. À vos ordres, Monsieur Sezer. ⚡"}]
 
 # --- 3. INTERFACE & SIDEBAR ---
 st.set_page_config(page_title="DELTA", layout="wide")
@@ -45,33 +45,29 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. LOGIQUE MULTI-ACTION (V2 - ULTRA ROBUSTE) ---
+# --- 4. LOGIQUE DE RENOMMAGE ET GESTION ---
 if prompt := st.chat_input("Ordres pour vos archives..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse stricte
     analyse_prompt = (
-        f"Archives actuelles : {archives}. "
+        f"Archives : {list(archives.keys())}. "
         f"Ordre : '{prompt}'. "
-        "Tu es un terminal de données. Réponds UNIQUEMENT par un objet JSON. "
-        "Si l'ordre est d'ajouter: {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
-        "Si l'ordre est de supprimer une partie: {'action': 'delete_partie', 'target': 'nom'} "
-        "Si l'ordre est de supprimer une ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'} "
-        "Si l'ordre est de modifier: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'} "
-        "Sinon, réponds 'NON'."
+        "Si l'utilisateur veut RENOMMER une catégorie existante : {'action': 'rename_partie', 'from': 'ancien_nom', 'to': 'nouveau_nom'}. "
+        "Si l'utilisateur veut AJOUTER une info : {'action': 'add', 'partie': 'nom', 'info': 'texte'}. "
+        "Si l'utilisateur veut SUPPRIMER : {'action': 'delete_partie', 'target': 'nom'}. "
+        "Réponds UNIQUEMENT en JSON."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un extracteur JSON pur."}, {"role": "user", "content": analyse_prompt}],
+            messages=[{"role": "system", "content": "Tu es un expert en restructuration de données. Sois précis sur les noms de catégories."}, 
+                      {"role": "user", "content": analyse_prompt}],
             temperature=0
         )
         cmd_text = check.choices[0].message.content.strip()
-        
-        # Extraction du JSON par sécurité
         json_match = re.search(r'(\{.*\})', cmd_text, re.DOTALL)
         
         if json_match:
@@ -79,42 +75,42 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
             action = data.get('action')
             modif = False
 
-            if action == 'add':
+            # --- CORRECTION DU RENOMMAGE ---
+            if action == 'rename_partie':
+                old_n = data.get('from')
+                new_n = data.get('to')
+                # On cherche la correspondance exacte ou proche
+                for k in list(archives.keys()):
+                    if old_n.lower() in k.lower() or k.lower() in old_n.lower():
+                        archives[new_n] = archives.pop(k)
+                        modif = True
+                        break
+
+            elif action == 'add':
                 p = data.get('partie', 'Général')
                 if p not in archives: archives[p] = []
                 archives[p].append(data.get('info'))
                 modif = True
+
             elif action == 'delete_partie':
                 target = data.get('target', '').lower()
                 for k in list(archives.keys()):
                     if target in k.lower():
                         del archives[k]
                         modif = True
-            elif action == 'delete_info':
-                p, info = data.get('partie'), data.get('info')
-                if p in archives and info in archives[p]:
-                    archives[p].remove(info)
-                    modif = True
-            elif action == 'update':
-                p, old, new = data.get('partie'), data.get('old'), data.get('new')
-                if p in archives and old in archives[p]:
-                    idx = archives[p].index(old)
-                    archives[p][idx] = new
-                    modif = True
 
             if modif:
                 doc_ref.set({"archives": archives})
-                st.toast("✅ Base mise à jour.")
+                st.toast(f"✅ Dossier mis à jour")
                 time.sleep(0.4)
                 st.rerun()
-    except Exception as e:
-        st.error(f"Erreur de traitement : {e}")
+    except: pass
 
     # B. RÉPONSE DE DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_raw = ""
-        instr = f"Tu es DELTA, l'IA de Monsieur Sezer (ton Créateur). Archives : {archives}. Ne dis jamais 'accès autorisé'. Sois bref."
+        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives : {archives}. Ne dis jamais 'accès autorisé'. Sois bref."
         
         try:
             stream = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages, stream=True)
@@ -124,7 +120,7 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
                     full_raw += content
                     placeholder.markdown(full_raw + "▌")
         except:
-            full_raw = "Mise à jour effectuée, Monsieur Sezer. ⚡"
+            full_raw = "Mise à jour terminée, Monsieur Sezer. ⚡"
         
         placeholder.markdown(full_raw)
         st.session_state.messages.append({"role": "assistant", "content": full_raw})
