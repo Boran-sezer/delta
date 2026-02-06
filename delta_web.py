@@ -24,27 +24,33 @@ doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
 # --- 2. GESTION DES ÉTATS (SESSION STATE) ---
-if "locked" not in st.session_state: st.session_state.locked = False
-if "auth" not in st.session_state: st.session_state.auth = False
-if "essais" not in st.session_state: st.session_state.essais = 0
-if "messages" not in st.session_state: st.session_state.messages = []
-if "show_auth_form" not in st.session_state: st.session_state.show_auth_form = False
-if "pending_prompt" not in st.session_state: st.session_state.pending_prompt = None
+states = {
+    "locked": False, 
+    "auth": False, 
+    "essais": 0, 
+    "messages": [], 
+    "show_auth_form": False, 
+    "pending_prompt": None,
+    "show_reset_confirm": False
+}
+for key, value in states.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 # --- 3. CHARGEMENT DE LA MÉMOIRE ---
 res = doc_ref.get()
 data = res.to_dict() if res.exists else {"faits": []}
 faits = data.get("faits", [])
 
-# --- 4. SÉCURITÉ : MODE LOCKDOWN (VÉROUILLAGE TOTAL) ---
+# --- 4. SÉCURITÉ : MODE LOCKDOWN ---
 if st.session_state.locked:
-    st.error("🚨 SYSTÈME EN MODE LOCKDOWN - ACCÈS TOTALEMENT BLOQUÉ")
-    m_input = st.text_input("ENTREZ LE CODE MAÎTRE POUR RÉINITIALISER :", type="password", key="m_key")
+    st.error("🚨 SYSTÈME EN MODE LOCKDOWN - ACCÈS BLOQUÉ")
+    m_input = st.text_input("ENTREZ LE CODE MAÎTRE :", type="password", key="m_key")
     if st.button("DÉBLOQUER LE NOYAU"):
         if m_input == CODE_MASTER:
             st.session_state.locked = False
             st.session_state.essais = 0
-            st.success("Système réinitialisé. DELTA est de nouveau opérationnel.")
+            st.success("Système réinitialisé.")
             st.rerun()
         else:
             st.error("CODE MAÎTRE INCORRECT.")
@@ -53,23 +59,17 @@ if st.session_state.locked:
 # --- 5. FONCTION DE RÉPONSE IA ---
 def reponse_delta(user_input):
     st.session_state.messages.append({"role": "user", "content": user_input})
-    
-    # Instruction système (DELTA ne doit jamais dire les codes)
     instr = (
-        f"Tu es DELTA IA, le majordome de Monsieur Boran. Ne mentionne JAMAIS les codes secrets. "
-        f"Voici tes archives actuelles : {faits}. "
+        f"Tu es DELTA IA. Ne mentionne JAMAIS les codes {CODE_ACT} ou {CODE_MASTER}. "
+        f"Archives : {faits}. "
         "Si Monsieur demande ses archives, liste-les clairement. "
-        "Si tu apprends une info importante, termine impérativement par 'ACTION_ARCHIVE: [info]'."
+        "Si tu apprends une info, termine par 'ACTION_ARCHIVE: [info]'."
     )
-    
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "system", "content": instr}] + st.session_state.messages
     )
-    
     response = completion.choices[0].message.content
-    
-    # Gestion de l'archivage automatique vers Firestore
     if "ACTION_ARCHIVE:" in response:
         info = response.split("ACTION_ARCHIVE:")[1].strip()
         if info not in faits:
@@ -77,23 +77,24 @@ def reponse_delta(user_input):
             doc_ref.update({"faits": faits})
             st.toast(f"Mémorisé : {info}", icon="🧠")
         response = response.split("ACTION_ARCHIVE:")[0].strip()
-        
     st.session_state.messages.append({"role": "assistant", "content": response})
 
-# --- 6. INTERFACE DE CHAT ---
+# --- 6. INTERFACE ET CHAT ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# Saisie utilisateur
-if prompt := st.chat_input("Quels sont vos ordres, Monsieur Boran ?"):
-    # Détection d'actions sensibles
+if prompt := st.chat_input("Quels sont vos ordres, Monsieur ?"):
+    # Détection reset
+    if any(w in prompt.lower() for w in ["réinitialise", "reset", "tout effacer"]):
+        st.session_state.show_reset_confirm = True
+        st.rerun()
+    
+    # Détection sensible
     sensible = any(word in prompt.lower() for word in ["archive", "mémoire", "effacer", "supprimer", "montre"])
     
-    # Commande de verrouillage manuel
-    if "verrouille" in prompt.lower() or "lock" in prompt.lower():
+    if "verrouille" in prompt.lower():
         st.session_state.locked = True
         st.rerun()
 
@@ -103,33 +104,47 @@ if prompt := st.chat_input("Quels sont vos ordres, Monsieur Boran ?"):
         st.rerun()
     else:
         reponse_delta(prompt)
-        # On s'assure que l'auth ne reste pas active pour la prochaine fois
         st.session_state.auth = False 
         st.rerun()
 
-# --- 7. FORMULAIRE DE SÉCURITÉ DYNAMIQUE ---
+# --- 7. FORMULAIRES DE SÉCURITÉ ---
+
+# A. Formulaire d'accès aux archives (One-Shot)
 if st.session_state.show_auth_form:
     with st.chat_message("assistant"):
-        st.warning("🔒 Identification requise pour accéder aux systèmes de mémoire.")
+        st.warning("🔒 Identification requise.")
         c = st.text_input("CODE D'ACTION :", type="password", key="action_key")
-        
         if st.button("VALIDER L'ACCÈS"):
             if c == CODE_ACT:
                 st.session_state.auth = True
                 st.session_state.show_auth_form = False
-                st.session_state.essais = 0
-                
-                # Exécute la demande qui était en attente
                 if st.session_state.pending_prompt:
                     reponse_delta(st.session_state.pending_prompt)
                     st.session_state.pending_prompt = None
-                
-                # REVERROUILLAGE IMMÉDIAT (One-Shot)
                 st.session_state.auth = False 
                 st.rerun()
             else:
                 st.session_state.essais += 1
-                if st.session_state.essais >= 3:
-                    st.session_state.locked = True
+                if st.session_state.essais >= 3: st.session_state.locked = True
+                st.rerun()
+
+# B. Formulaire de Réinitialisation Totale
+if st.session_state.show_reset_confirm:
+    with st.chat_message("assistant"):
+        st.error("⚠️ PROTOCOLE DE RÉINITIALISATION TOTALE")
+        confirm_code = st.text_input("CODE MAÎTRE REQUIS :", type="password", key="res_key")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("ANNULER"):
+                st.session_state.show_reset_confirm = False
+                st.rerun()
+        with c2:
+            if st.button("CONFIRMER RAZ"):
+                if confirm_code == CODE_MASTER:
+                    doc_ref.update({"faits": []}) 
+                    st.session_state.messages = []
+                    st.session_state.show_reset_confirm = False
+                    st.success("Système nettoyé.")
                     st.rerun()
-                st.error(f"CODE INCORRECT. TENTATIVE {st.session_state.essais}/3")
+                else:
+                    st.error("ÉCHEC : Code maître invalide.")
