@@ -22,47 +22,73 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. ÉTATS DE SESSION ---
+# --- 2. ÉTATS ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. En attente d'ordres. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
-if "ask_auth" not in st.session_state: st.session_state.ask_auth = False
-if "target_prompt" not in st.session_state: st.session_state.target_prompt = None
+if "auth_done" not in st.session_state: st.session_state.auth_done = False
 
-# --- 3. CHARGEMENT MÉMOIRE ---
+# --- 3. RÉCUPÉRATION MÉMOIRE ---
 res = doc_ref.get()
-data = res.to_dict() if res.exists else {"faits": []}
-faits = data.get("faits", [])
+faits = res.to_dict().get("faits", []) if res.exists else []
 
-# --- 4. SÉCURITÉ LOCKDOWN ---
+# --- 4. LOCKDOWN ---
 if st.session_state.locked:
     st.error("🚨 SYSTÈME VERROUILLÉ")
-    if st.text_input("CODE MAÎTRE :", type="password", key="lock") == CODE_MASTER:
+    if st.text_input("CODE MAÎTRE :", type="password", key="l_key") == CODE_MASTER:
         st.session_state.locked = False
         st.rerun()
     st.stop()
 
-# --- 5. FONCTION DE RÉPONSE ---
-def reponse_delta(prompt, mode="normal"):
-    if mode == "archives":
-        instr = f"Tu es DELTA. Liste ces informations de manière brute et courte : {faits}."
-    else:
-        instr = (
-            f"Tu es DELTA, majordome de Monsieur SEZER. Sois ultra-concis. "
-            f"Archives : {faits}. "
-            "Si Monsieur demande de supprimer, réponds : 'ACTION_DELETE: [mot]'."
-            "Sinon : 'ACTION_ARCHIVE: [info]'."
-        )
+# --- 5. INTERFACE ---
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]): st.markdown(m["content"])
+
+# --- 6. GESTION DES ORDRES ---
+if prompt := st.chat_input("Ordres ?"):
+    p_low = prompt.lower()
+    
+    # A. VERROUILLAGE
+    if "verrouille" in p_low:
+        st.session_state.locked = True
+        st.rerun()
+
+    # B. SÉCURITÉ MÉMOIRE (BLOQUAGE AVANT IA)
+    if any(w in p_low for w in ["mémoire", "archive", "souviens", "notes"]) and not st.session_state.auth_done:
+        with st.chat_message("assistant"):
+            st.warning("🔒 Code de sécurité requis.")
+            c = st.text_input("CODE :", type="password", key="c_key")
+            if st.button("VALIDER"):
+                if c == CODE_ACT:
+                    st.session_state.auth_done = True
+                    st.rerun()
+                else: st.error("Refusé.")
+        st.stop()
+
+    # C. RÉPONSE IA
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_raw, displayed = "", ""
+        
+        # Instruction ultra-stricte
+        instr = (
+            f"Tu es DELTA, majordome de Monsieur SEZER. Ultra-concis. "
+            f"Archives : {faits}. "
+            "Si on demande de supprimer : réponds 'ACTION_DELETE: [mot]'. "
+            "Si nouvelle info : 'ACTION_ARCHIVE: [info]'. "
+            "Si accès mémoire validé : liste les faits brièvement."
+        )
+
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": instr}] + st.session_state.messages,
             stream=True
         )
-        
+
         for chunk in stream:
             content = chunk.choices[0].delta.content
             if content:
@@ -72,64 +98,26 @@ def reponse_delta(prompt, mode="normal"):
                     displayed += char
                     placeholder.markdown(displayed + "▌")
                     time.sleep(0.01)
-        
-        clean = full_raw.split("ACTION_")[0].strip()
-        if not clean and "ACTION_DELETE" in full_raw:
-            clean = "Mémoire mise à jour, Monsieur SEZER."
-        
-        placeholder.markdown(clean)
-        st.session_state.messages.append({"role": "assistant", "content": clean})
 
-        # ACTIONS SUR LA BASE DE DONNÉES
+        clean = full_raw.split("ACTION_")[0].strip()
+        if not clean: clean = "Ordre exécuté, Monsieur SEZER."
+        placeholder.markdown(clean)
+
+        # D. TRAITEMENT ACTIONS
         if "ACTION_DELETE:" in full_raw:
             cible = full_raw.split("ACTION_DELETE:")[1].strip().lower()
-            nouveaux_faits = [f for f in faits if cible not in f.lower()]
-            doc_ref.set({"faits": nouveaux_faits}, merge=True)
-            st.rerun()
+            faits = [f for f in faits if cible not in f.lower()]
+            doc_ref.set({"faits": faits}, merge=True)
+            st.toast("Supprimé.")
 
         if "ACTION_ARCHIVE:" in full_raw:
             info = full_raw.split("ACTION_ARCHIVE:")[1].strip()
             if info not in faits:
                 faits.append(info)
                 doc_ref.set({"faits": faits}, merge=True)
+                st.toast("Mémorisé.")
 
-# --- 6. INTERFACE ---
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
-
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
-
-# FORMULAIRE DE SÉCURITÉ (Bloque tout affichage mémoire)
-if st.session_state.ask_auth:
-    with st.chat_message("assistant"):
-        st.warning("🔒 Accès restreint. Identifiez-vous.")
-        code = st.text_input("CODE :", type="password", key="auth_key")
-        if st.button("VALIDER"):
-            if code == CODE_ACT:
-                st.session_state.ask_auth = False
-                reponse_delta("Affichage", mode="archives")
-                st.rerun()
-            else:
-                st.error("Accès refusé.")
-    st.stop()
-
-# ENTRÉE UTILISATEUR
-if prompt := st.chat_input("Vos ordres ?"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    p_low = prompt.lower()
+        st.session_state.messages.append({"role": "assistant", "content": clean})
     
-    # 1. Vérification Verrouillage
-    if "verrouille" in p_low:
-        st.session_state.locked = True
-        st.rerun()
-    
-    # 2. Vérification Sécurité Mémoire (SCAN TOTAL)
-    mots_interdits = ["mémoire", "archive", "souviens", "faits", "notes", "qu'est-ce que tu sais"]
-    if any(w in p_low for w in mots_interdits):
-        st.session_state.ask_auth = True
-        st.rerun()
-    
-    # 3. Traitement normal (inclut suppression)
-    else:
-        reponse_delta(prompt)
-        st.rerun()
+    st.session_state.auth_done = False # Reset sécurité
+    st.rerun()
