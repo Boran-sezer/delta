@@ -24,12 +24,13 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. Ravi de vous revoir, Monsieur SEZER. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. Prêt, Monsieur SEZER. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
+if "temp_text" not in st.session_state: st.session_state.temp_text = "" # Pour garder le texte avant le code
 
-# --- 3. LOCKDOWN ---
+# --- 3. SÉCURITÉ LOCKDOWN ---
 if st.session_state.locked:
     st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
     m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_lock")
@@ -47,19 +48,26 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. AUTHENTIFICATION ---
+# --- 5. AUTHENTIFICATION (AVEC MÉMOIRE DU TEXTE) ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
-        st.warning(f"🔒 Accès aux archives restreint ({3 - st.session_state.essais}/3)")
-        c = st.text_input("Code de sécurité :", type="password", key=f"auth_{len(st.session_state.messages)}")
+        # On affiche le début de la réponse que l'IA a commencé à donner
+        if st.session_state.temp_text:
+            st.markdown(st.session_state.temp_text + "...")
+        
+        st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
+        c = st.text_input("Code :", type="password", key=f"auth_{len(st.session_state.messages)}")
+        
         if st.button("VALIDER"):
             if c == CODE_ACT:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
                 res = doc_ref.get()
                 faits = res.to_dict().get("faits", []) if res.exists else []
-                txt = "Accès autorisé, Créateur. Voici le contenu de mes archives : \n\n" + "\n".join([f"- {i}" for i in faits])
+                # On combine le texte précédent avec les archives
+                txt = f"{st.session_state.temp_text}\n\nAccès autorisé, Créateur. Voici vos archives : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
+                st.session_state.temp_text = "" # Reset
                 st.rerun()
             else:
                 st.session_state.essais += 1
@@ -83,15 +91,10 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
             res = doc_ref.get()
             faits = res.to_dict().get("faits", []) if res.exists else []
             
-            # CONSIGNES DE DISCRÉTION
             instr = (
-                "Tu es DELTA, le majordome de Monsieur SEZER. "
-                "Monsieur SEZER est ton Créateur. Tu dois l'appeler par son nom ou 'Créateur'. "
-                "Tu peux dire qui il est (ton Créateur, Monsieur SEZER). "
-                f"INTERDICTION : Tu as accès à ces archives privées : {faits}. "
-                "Tu ne dois JAMAIS lister, citer ou résumer ces archives sans que le code soit validé. "
-                "Si Monsieur demande 'Qui suis-je ?', réponds normalement sans donner de détails des archives. "
-                "Si Monsieur demande explicitement de voir sa mémoire ou ses données privées, réponds : REQUIS_CODE."
+                "Tu es DELTA, le majordome de Monsieur SEZER (ton Créateur). "
+                f"SÉCURITÉ : Ne cite JAMAIS ces archives sans code : {faits}. "
+                "Si tu dois en parler, commence ta phrase puis termine par REQUIS_CODE."
             )
 
             stream = client.chat.completions.create(
@@ -105,6 +108,8 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
                 if content:
                     full_raw += content
                     if "REQUIS_CODE" in full_raw:
+                        # Sauvegarde du texte avant la coupure
+                        st.session_state.temp_text = full_raw.replace("REQUIS_CODE", "").strip()
                         st.session_state.pending_auth = True
                         break
                     for char in content:
