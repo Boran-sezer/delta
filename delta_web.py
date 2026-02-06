@@ -20,29 +20,39 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. GESTION DU VERROUILLAGE DYNAMIQUE ---
+# --- 2. GESTION DU VERROUILLAGE (FORCE) ---
 if "locked" not in st.session_state:
     st.session_state.locked = False
 
-def unlock():
-    if st.session_state.pass_input == "B2008a2020@":
+# Fonction de déverrouillage
+def verify_unlock():
+    if st.session_state.pwd_field == "B2008a2020@":
         st.session_state.locked = False
-        st.toast("🔓 Accès rétabli, Monsieur Sezer.")
+        st.success("Accès rétabli.")
+        time.sleep(0.5)
+        st.rerun()
     else:
         st.error("Code incorrect.")
 
+# Si le système est verrouillé, on bloque TOUT l'affichage ici
 if st.session_state.locked:
-    st.markdown("<h2 style='color:#ff4b4b;text-align:center;'>🔒 SYSTÈME VERROUILLÉ</h2>", unsafe_allow_html=True)
-    st.text_input("Saisissez le code de sécurité", type="password", key="pass_input", on_change=unlock)
-    st.stop()
+    st.markdown("<h2 style='color:#ff4b4b;text-align:center;'>🔒 SYSTÈME DELTA VERROUILLÉ</h2>", unsafe_allow_html=True)
+    st.text_input("Code de sécurité requis", type="password", key="pwd_field", on_change=verify_unlock)
+    st.stop() # Arrête l'exécution du reste du code
 
-# --- 3. RÉCUPÉRATION DES DONNÉES ---
+# --- 3. INTERFACE ---
+st.set_page_config(page_title="DELTA AI", layout="wide")
+col1, col2 = st.columns([0.9, 0.1])
+with col1:
+    st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
+with col2:
+    if st.button("🔒 Lock"):
+        st.session_state.locked = True
+        st.rerun()
+
+# Récupération des données
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
-
-# --- 4. INTERFACE ---
-st.set_page_config(page_title="DELTA AI", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -50,17 +60,17 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 5. LOGIQUE DE TRAITEMENT ---
+# --- 4. LOGIQUE DE CHAT ET COMMANDES ---
 if prompt := st.chat_input("Message pour DELTA..."):
-    # Commande de verrouillage manuelle
-    if any(word in prompt.lower() for word in ["verrouille", "verrouillage", "lock"]):
+    # Commande textuelle de verrouillage
+    if any(x in prompt.lower() for x in ["verrouille", "lock", "verrouillage"]):
         st.session_state.locked = True
         st.rerun()
 
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Archivage discret
+    # Analyse d'archivage
     sys_analyse = f"Archives : {archives}. JSON : {{'action':'add', 'cat':'NOM', 'val':'INFO'}} ou {{'action':'none'}}"
     try:
         check = client.chat.completions.create(
@@ -69,15 +79,14 @@ if prompt := st.chat_input("Message pour DELTA..."):
             temperature=0
         )
         match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
-        if match:
+        if match and "add" in match.group(0):
             data = json.loads(match.group(0).replace("'", '"'))
-            if data.get('action') == 'add':
-                c, v = data.get('cat', 'Mémoire'), data.get('val')
-                if v and v not in archives.get(c, []):
-                    if c not in archives: archives[c] = []
-                    archives[c].append(v)
-                    doc_ref.set({"archives": archives})
-                    st.toast("💾")
+            c, v = data.get('cat', 'Mémoire'), data.get('val')
+            if v and v not in archives.get(c, []):
+                if c not in archives: archives[c] = []
+                archives[c].append(v)
+                doc_ref.set({"archives": archives})
+                st.toast("💾")
     except: pass
 
     # Réponse de DELTA
@@ -91,7 +100,7 @@ if prompt := st.chat_input("Message pour DELTA..."):
             )
             final = resp.choices[0].message.content
         except:
-            final = "Système opérationnel."
+            final = "Système opérationnel, Monsieur Sezer."
         
         st.markdown(final)
         st.session_state.messages.append({"role": "assistant", "content": final})
