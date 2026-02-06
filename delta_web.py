@@ -20,52 +20,50 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. ÉTATS DE SESSION ---
-if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA paré, Monsieur Sezer. ⚡"}]
-
-# --- 3. INTERFACE & SIDEBAR ---
-st.set_page_config(page_title="DELTA", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
-
+# --- 2. RÉCUPÉRATION DES DONNÉES ---
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
-# Affichage immédiat des archives
+# --- 3. INTERFACE ---
+st.set_page_config(page_title="DELTA AI", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : Archivage Autonome</h1>", unsafe_allow_html=True)
+
 with st.sidebar:
-    st.title("📂 Archives de Monsieur Sezer")
+    st.title("📂 Archives Intelligentes")
     if archives:
         for partie, infos in archives.items():
             with st.expander(f"📁 {partie}"):
                 for i in infos:
                     st.write(f"• {i}")
     else:
-        st.info("Archives vides.")
+        st.info("Aucune archive pour le moment.")
+
+if "messages" not in st.session_state: 
+    st.session_state.messages = [{"role": "assistant", "content": "Je surveille désormais vos informations importantes pour les archiver tout seul, Monsieur Sezer. ⚡"}]
 
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. LOGIQUE DE COMMANDE (VERSION RAPIDE) ---
-if prompt := st.chat_input("Ex: Renomme Vert en Car..."):
+# --- 4. LE CERVEAU AUTONOME (AUTO-ARCHIVE) ---
+if prompt := st.chat_input("Dites n'importe quoi..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
 
-    analyse_prompt = (
-        f"Archives : {list(archives.keys())}. "
-        f"Ordre : '{prompt}'. "
-        "Réponds UNIQUEMENT en JSON : "
-        "Si RENOMMER : {'action': 'rename', 'vieux': 'nom', 'nouveau': 'nom'} "
-        "Si AJOUTER : {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
-        "Si SUPPRIMER : {'action': 'delete', 'cible': 'nom'} "
-        "Sinon réponds 'NON'."
+    # L'IA analyse si une information mérite d'être archivée sans qu'on lui demande
+    analyse_auto = (
+        f"Archives actuelles : {list(archives.keys())}. "
+        f"Dernier message de Monsieur Sezer : '{prompt}'. "
+        "Tu es la mémoire de DELTA. Analyse si ce message contient une info importante à conserver. "
+        "Si oui, réponds UNIQUEMENT en JSON : "
+        "{'action': 'save', 'cat': 'nom_du_dossier', 'info': 'contenu_à_sauver'} "
+        "Si l'utilisateur demande explicitement de renommer : {'action': 'rename', 'old': 'ancien', 'new': 'nouveau'} "
+        "Si rien d'important : réponds 'NON'."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un extracteur JSON."}, {"role": "user", "content": analyse_prompt}],
+            messages=[{"role": "system", "content": "Tu es un gestionnaire de mémoire autonome."}, {"role": "user", "content": analyse_auto}],
             temperature=0
         )
         cmd_text = check.choices[0].message.content.strip()
@@ -76,45 +74,35 @@ if prompt := st.chat_input("Ex: Renomme Vert en Car..."):
             action = data.get('action')
             modif = False
 
-            if action == 'rename':
-                v, n = data.get('vieux'), data.get('nouveau')
-                for k in list(archives.keys()):
-                    if v.lower() in k.lower() or k.lower() in v.lower():
-                        archives[n] = archives.pop(k)
-                        modif = True
-                        break
-
-            elif action == 'add':
-                p = data.get('partie', 'Général')
-                if p not in archives: archives[p] = []
-                archives[p].append(data.get('info'))
-                modif = True
-
-            elif action == 'delete':
-                target = data.get('cible', '').lower()
-                for k in list(archives.keys()):
-                    if target in k.lower():
-                        del archives[k]
-                        modif = True
-                        break
+            if action == 'save':
+                cat = data.get('cat', 'Divers')
+                if cat not in archives: archives[cat] = []
+                # On évite les doublons
+                if data.get('info') not in archives[cat]:
+                    archives[cat].append(data.get('info'))
+                    modif = True
+            
+            elif action == 'rename':
+                o, n = data.get('old'), data.get('new')
+                if o in archives:
+                    archives[n] = archives.pop(o)
+                    modif = True
 
             if modif:
-                # Mise à jour Firebase ultra-rapide
                 doc_ref.set({"archives": archives})
-                # On force le rechargement immédiat AVANT la réponse de l'IA
+                st.toast(f"💾 Archivé dans {data.get('cat', 'Archives')}")
+                time.sleep(0.3)
                 st.rerun()
-                
-    except:
-        pass
+    except: pass
 
-    # B. RÉPONSE DE DELTA (Après la mise à jour)
+    # --- 5. RÉPONSE DE DELTA ---
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives : {archives}. Sois bref."
+        instr = f"Tu es DELTA. Tu archives automatiquement les infos importantes de Monsieur Sezer. Archives : {archives}. Sois bref."
         try:
             resp = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages)
             full_raw = resp.choices[0].message.content
         except:
-            full_raw = "Mise à jour terminée, Monsieur Sezer. ⚡"
+            full_raw = "Compris, Monsieur Sezer. ⚡"
         
         st.markdown(full_raw)
         st.session_state.messages.append({"role": "assistant", "content": full_raw})
