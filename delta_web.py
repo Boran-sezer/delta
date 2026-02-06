@@ -45,55 +45,57 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. LOGIQUE DE COMMANDE (FORCE BRUTE) ---
-if prompt := st.chat_input("Ordres pour vos archives..."):
+# --- 4. LOGIQUE DE COMMANDE (VERSION INFAILLIBLE) ---
+if prompt := st.chat_input("Ex: Renomme Vert en Car..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse simplifiée : On demande à l'IA de ne PAS réfléchir, juste de remplir un formulaire
+    # Analyse simplifiée au strict minimum
     analyse_prompt = (
-        f"Archives : {list(archives.keys())}. "
+        f"Archives actuelles : {list(archives.keys())}. "
         f"Ordre : '{prompt}'. "
-        "Réponds UNIQUEMENT par ce JSON : "
-        "{'action': 'add' ou 'rename' ou 'delete', 'cat_cible': 'nom', 'valeur': 'texte', 'nouveau_nom': 'texte'} "
+        "Réponds UNIQUEMENT en JSON : "
+        "Si l'utilisateur veut RENOMMER un dossier : {'action': 'rename', 'vieux': 'nom', 'nouveau': 'nom'} "
+        "Si l'utilisateur veut AJOUTER une info : {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
+        "Si l'utilisateur veut SUPPRIMER un dossier : {'action': 'delete', 'cible': 'nom'} "
+        "Sinon réponds 'NON'."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un convertisseur JSON strict."}, {"role": "user", "content": analyse_prompt}],
+            messages=[{"role": "system", "content": "Tu es un extracteur JSON. Réponds uniquement par le JSON."}, {"role": "user", "content": analyse_prompt}],
             temperature=0
         )
         cmd_text = check.choices[0].message.content.strip()
-        json_match = re.search(r'\{.*\}', cmd_text, re.DOTALL)
+        json_match = re.search(r'(\{.*\})', cmd_text, re.DOTALL)
         
         if json_match:
-            data = json.loads(json_match.group(0).replace("'", '"'))
+            data = json.loads(json_match.group(1).replace("'", '"'))
             action = data.get('action')
             modif = False
 
-            # --- LOGIQUE DE RENOMMAGE (PRIORITÉ) ---
-            if "renomme" in prompt.lower() or action == 'rename':
-                old_cat = data.get('cat_cible')
-                new_cat = data.get('nouveau_nom')
-                # On cherche si la catégorie existe
+            # --- LOGIQUE DE RENOMMAGE (DIRECTE) ---
+            if action == 'rename':
+                v, n = data.get('vieux'), data.get('nouveau')
+                # On cherche le dossier qui correspond (même approximativement)
                 for k in list(archives.keys()):
-                    if old_cat.lower() in k.lower():
-                        archives[new_cat] = archives.pop(k)
+                    if v.lower() in k.lower() or k.lower() in v.lower():
+                        archives[n] = archives.pop(k)
                         modif = True
                         break
 
-            # --- LOGIQUE D'AJOUT (VOTRE VERSION ORIGINALE) ---
-            elif action == 'add' or "ajoute" in prompt.lower():
-                p = data.get('cat_cible', 'Général')
+            # --- LOGIQUE D'AJOUT (VOTRE VERSION) ---
+            elif action == 'add':
+                p = data.get('partie', 'Général')
                 if p not in archives: archives[p] = []
-                archives[p].append(data.get('valeur'))
+                archives[p].append(data.get('info'))
                 modif = True
 
             # --- LOGIQUE DE SUPPRESSION ---
-            elif action == 'delete' or "supprime" in prompt.lower():
-                target = data.get('cat_cible', '').lower()
+            elif action == 'delete':
+                target = data.get('cible', '').lower()
                 for k in list(archives.keys()):
                     if target in k.lower():
                         del archives[k]
@@ -105,17 +107,14 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
                 st.toast("✅ Base mise à jour.")
                 time.sleep(0.4)
                 st.rerun()
-    except Exception as e:
+    except:
         pass
 
     # B. RÉPONSE DE DELTA
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA, l'IA de Monsieur Sezer. Archives : {archives}. Ne dis jamais 'accès autorisé'."
+        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives : {archives}. Ne dis jamais 'accès autorisé'. Sois bref."
         try:
-            resp = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": instr}] + st.session_state.messages
-            )
+            resp = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages)
             full_raw = resp.choices[0].message.content
         except:
             full_raw = "C'est fait, Monsieur Sezer. ⚡"
