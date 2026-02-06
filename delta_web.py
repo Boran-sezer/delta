@@ -43,64 +43,70 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. LE CERVEAU (LOGIQUE DE DÉCISION) ---
-if prompt := st.chat_input("Ordre ou message..."):
+# --- 4. TRAITEMENT DES ORDRES ---
+if prompt := st.chat_input("Votre message ou ordre..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Analyse simplifiée mais ultra-puissante
-    analyse_prompt = (
+    # Analyse simplifiée
+    analyse_instr = (
         f"Archives : {list(archives.keys())}. "
-        f"Message : '{prompt}'. "
-        "Réponds UNIQUEMENT par un JSON : "
-        "- Si RENOMMER catégorie: {'action': 'rename', 'old': 'nom', 'new': 'nom'} "
-        "- Si AJOUTER/ARCHIVER : {'action': 'add', 'cat': 'nom', 'val': 'texte'} "
-        "- Si SUPPRIMER catégorie: {'action': 'delete', 'cat': 'nom'} "
-        "- Sinon: {'action': 'none'}"
+        f"Ordre : '{prompt}'. "
+        "Réponds UNIQUEMENT en JSON : "
+        "{'action': 'add', 'cat': 'nom', 'info': 'texte'} pour ajouter/sauver, "
+        "{'action': 'rename', 'old': 'nom', 'new': 'nom'} pour renommer, "
+        "sinon {'action': 'none'}."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un terminal JSON strict."}, {"role": "user", "content": analyse_prompt}],
+            messages=[{"role": "system", "content": "Tu es un extracteur JSON pur."}, {"role": "user", "content": analyse_instr}],
             temperature=0
         )
-        data = json.loads(re.search(r'\{.*\}', check.choices[0].message.content).group(0).replace("'", '"'))
-        action = data.get('action')
-        modif = False
+        # Extraction robuste du JSON
+        match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0).replace("'", '"'))
+            action = data.get('action')
+            modif = False
 
-        if action == 'rename':
-            o, n = data.get('old'), data.get('new')
-            if o in archives:
-                archives[n] = archives.pop(o)
-                modif = True
-        elif action == 'add':
-            c, v = data.get('cat', 'Général'), data.get('val')
-            if v and v not in archives.get(c, []):
-                if c not in archives: archives[c] = []
-                archives[c].append(v)
-                modif = True
-        elif action == 'delete':
-            c = data.get('cat')
-            if c in archives:
-                del archives[c]
-                modif = True
+            if action == 'add':
+                c, i = data.get('cat', 'Général'), data.get('info')
+                if i:
+                    if c not in archives: archives[c] = []
+                    archives[c].append(i)
+                    modif = True
+            elif action == 'rename':
+                o, n = data.get('old'), data.get('new')
+                if o in archives:
+                    archives[n] = archives.pop(o)
+                    modif = True
 
-        if modif:
-            doc_ref.set({"archives": archives})
-            st.toast("✅ Base mise à jour")
-            time.sleep(0.4)
-            st.rerun()
-    except: pass
+            if modif:
+                doc_ref.set({"archives": archives})
+                st.toast("✅ Base mise à jour")
+                time.sleep(0.5)
+                st.rerun()
+    except:
+        pass
 
-    # B. RÉPONSE (AVEC LES ARCHIVES EN MÉMOIRE)
+    # B. RÉPONSE DE DELTA AVEC SA MÉMOIRE
     with st.chat_message("assistant"):
-        # On donne TOUTES les archives à l'IA pour qu'elle sache de quoi elle parle
-        mem_context = "Tu connais ces infos sur Monsieur Sezer : " + str(archives)
+        # On liste toutes les archives pour l'IA
+        memoire_texte = ""
+        for c, v in archives.items():
+            memoire_texte += f"Dossier {c} : {', '.join(v)}. "
+
+        instruction_finale = (
+            f"Tu es DELTA. Voici tes archives sur Monsieur Sezer : {memoire_texte}. "
+            "Utilise ces infos pour répondre. Sois bref et n'utilise pas 'accès autorisé'."
+        )
+        
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
-                messages=[{"role": "system", "content": f"Tu es DELTA. {mem_context}. Sois bref et précis."}] + st.session_state.messages
+                messages=[{"role": "system", "content": instruction_finale}] + st.session_state.messages
             )
             txt = resp.choices[0].message.content
         except:
