@@ -7,9 +7,6 @@ import json
 import time
 
 # --- 1. CONFIGURATION ---
-CODE_ACT = "20082008"
-CODE_MASTER = "B2008a2020@"
-
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -24,104 +21,75 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. À vos ordres, Créateur. ⚡"}]
-if "locked" not in st.session_state: st.session_state.locked = False
-if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
-if "essais" not in st.session_state: st.session_state.essais = 0
-if "temp_text" not in st.session_state: st.session_state.temp_text = ""
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel, Créateur. Accès libre et gestion intelligente activés. ⚡"}]
 
-# --- 3. LOCKDOWN ---
-if st.session_state.locked:
-    st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
-    m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_lock")
-    if st.button("🔓 RÉACTIVER"):
-        if m_input == CODE_MASTER:
-            st.session_state.locked = False
-            st.session_state.essais = 0
-            st.rerun()
-    st.stop()
-
-# --- 4. INTERFACE ---
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
+# --- 3. INTERFACE ---
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA - SYSTÈME OUVERT</h1>", unsafe_allow_html=True)
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. AUTHENTIFICATION (STRICTE ET SÉLECTIVE) ---
-if st.session_state.pending_auth:
-    with st.chat_message("assistant"):
-        if st.session_state.temp_text:
-            st.markdown(st.session_state.temp_text + "...")
-        st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
-        c = st.text_input("Code :", type="password", key=f"auth_{len(st.session_state.messages)}")
-        
-        if st.button("VALIDER"):
-            if c == CODE_ACT:
-                st.session_state.pending_auth = False
-                st.session_state.essais = 0
-                
-                res = doc_ref.get()
-                faits = res.to_dict().get("faits", []) if res.exists else []
-                
-                # PROTOCOLE DE RÉPONSE UNIQUE : On force l'IA à extraire uniquement la réponse
-                reponse_finale = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "system", "content": f"Tu es DELTA. Tu as accès à ces faits confidentiels : {faits}. RÉPONDS UNIQUEMENT à la question posée. INTERDICTION de lister les autres faits. Sois extrêmement précis et concis."},
-                    ] + st.session_state.messages
-                )
-                
-                txt = reponse_finale.choices[0].message.content
-                st.session_state.messages.append({"role": "assistant", "content": txt})
-                st.session_state.temp_text = ""
-                st.rerun()
-            else:
-                st.session_state.essais += 1
-                if st.session_state.essais >= 3:
-                    st.session_state.locked = True
-                st.rerun()
+# --- 4. TRAITEMENT, TRI AUTOMATIQUE ET RÉPONSE ---
+if prompt := st.chat_input("Vos ordres, Créateur ?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-# --- 6. TRAITEMENT ---
-if prompt := st.chat_input("Écrivez vos ordres ici..."):
-    if st.session_state.pending_auth:
-        st.error("Veuillez d'abord valider le code de sécurité.")
-    else:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # A. TRI AUTOMATIQUE DANS LES PARTIES (Modèle Rapide)
+    analyse_prompt = (
+        f"L'utilisateur dit : '{prompt}'. Est-ce une info personnelle à classer ? "
+        "Si oui, réponds UNIQUEMENT en JSON : {'partie': 'Catégorie', 'info': 'Détail'}. "
+        "Sinon réponds 'NON'."
+    )
+    check = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "user", "content": analyse_prompt}])
+    reponse_tri = check.choices[0].message.content.strip()
 
-        with st.chat_message("assistant"):
-            placeholder = st.empty()
-            full_raw, displayed = "", ""
+    if "{" in reponse_tri:
+        try:
+            data = json.loads(reponse_tri.replace("'", '"'))
+            res = doc_ref.get()
+            archives = res.to_dict().get("archives", {}) if res.exists else {}
             
-            instr = (
-                "Tu es DELTA, le majordome de Monsieur SEZER (ton Créateur). "
-                "Tu as une mémoire verrouillée. Si la question nécessite une information précise sur le Créateur "
-                "que tu ne possèdes pas en mémoire immédiate, réponds UNIQUEMENT : REQUIS_CODE."
-            )
+            partie = data['partie']
+            if partie not in archives: archives[partie] = []
+            if data['info'] not in archives[partie]:
+                archives[partie].append(data['info'])
+                doc_ref.set({"archives": archives})
+                st.toast(f"📂 Classé dans [{partie}] : {data['info']}")
+        except: pass
 
-            stream = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": instr}] + st.session_state.messages,
-                stream=True
-            )
+    # B. RÉPONSE DE DELTA AVEC ACCÈS DIRECT AUX ARCHIVES
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        full_raw, displayed = "", ""
+        
+        # Récupération des archives pour que l'IA puisse décider seule de les utiliser
+        res = doc_ref.get()
+        archives = res.to_dict().get("archives", {}) if res.exists else {}
+        
+        instr = (
+            f"Tu es DELTA, le majordome de Monsieur SEZER (ton Créateur). "
+            f"Voici tes archives organisées par parties : {archives}. "
+            "IMPORTANT : Ne montre ou ne cite ces archives QUE si la question du Créateur le nécessite. "
+            "Si on te demande qui tu es ou ce que tu sais, sois bref. "
+            "Réponds avec dévouement et efficacité."
+        )
 
-            for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    full_raw += content
-                    if "REQUIS_CODE" in full_raw:
-                        st.session_state.temp_text = full_raw.replace("REQUIS_CODE", "").strip()
-                        st.session_state.pending_auth = True
-                        break
-                    for char in content:
-                        displayed += char
-                        placeholder.markdown(displayed + "▌")
-                        time.sleep(0.01)
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": instr}] + st.session_state.messages,
+            stream=True
+        )
 
-            if st.session_state.pending_auth:
-                st.rerun()
-            else:
-                placeholder.markdown(full_raw)
-                st.session_state.messages.append({"role": "assistant", "content": full_raw})
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                full_raw += content
+                for char in content:
+                    displayed += char
+                    placeholder.markdown(displayed + "▌")
+                    time.sleep(0.01)
+
+        placeholder.markdown(full_raw)
+        st.session_state.messages.append({"role": "assistant", "content": full_raw})
