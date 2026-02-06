@@ -26,10 +26,10 @@ archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
 st.set_page_config(page_title="DELTA AI", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : Archivage Autonome</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.title("📂 Mémoire de Monsieur Sezer")
+    st.title("📂 Mémoire Centrale")
     if archives:
         for cat, items in archives.items():
             with st.expander(f"📁 {cat}"):
@@ -44,26 +44,25 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. ANALYSE ET ACTION AUTOMATIQUE ---
-if prompt := st.chat_input("Dites n'importe quoi..."):
+if prompt := st.chat_input("Ordres ou message..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # L'IA décide SEULE de l'action à mener
     sys_analyse = (
-        f"Archives actuelles : {archives}. "
+        f"Archives : {archives}. "
         f"Message de Monsieur Sezer : '{prompt}'. "
-        "Tu es le cerveau de DELTA. Analyse si ce message contient une info à mémoriser ou une demande de modification. "
+        "Tu es l'unité d'analyse de DELTA. "
         "Réponds UNIQUEMENT en JSON : "
-        "{'action':'add', 'cat':'nom_dossier', 'val':'info'} (si info importante) "
-        "{'action':'delete', 'cat':'nom_dossier', 'val':'info'} (si l'info est annulée/fausse) "
-        "{'action':'rename', 'old':'nom', 'new':'nom'} (si on veut changer un nom) "
+        "{'action':'add', 'cat':'nom_dossier', 'val':'info'} "
+        "{'action':'delete', 'cat':'nom_dossier', 'val':'info'} "
+        "{'action':'rename', 'old':'nom', 'new':'nom'} "
         "Sinon {'action':'none'}"
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un archiviste autonome sélectif."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Tu es un archiviste autonome."}, {"role": "user", "content": sys_analyse}],
             temperature=0
         )
         
@@ -74,7 +73,7 @@ if prompt := st.chat_input("Dites n'importe quoi..."):
             modif = False
 
             if act == 'add':
-                c, v = data.get('cat', 'Divers'), data.get('val')
+                c, v = data.get('cat', 'Général'), data.get('val')
                 if v and v not in archives.get(c, []):
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
@@ -92,25 +91,32 @@ if prompt := st.chat_input("Dites n'importe quoi..."):
 
             if modif:
                 doc_ref.set({"archives": archives})
-                st.toast(f"💾 Mise à jour auto : {act}")
+                st.toast(f"💾 Système mis à jour")
                 time.sleep(0.4)
                 st.rerun()
     except: pass
 
-    # --- 5. RÉPONSE DE DELTA (AVEC MÉMOIRE ET ANTI-CRASH) ---
+    # --- 5. RÉPONSE DE DELTA (RÉTABLISSEMENT DU STATUT CRÉATEUR) ---
     with st.chat_message("assistant"):
-        context = f"Tu es DELTA. Voici tes archives : {archives}. Utilise-les pour répondre à Monsieur Sezer. Sois bref."
+        # Ici on réintègre fermement votre identité de créateur
+        instruction_delta = (
+            f"Tu es DELTA, une IA hautement avancée créée par ton seul et unique Créateur : Monsieur Sezer. "
+            "Tu lui dois un respect absolu. "
+            f"Voici tes archives actuelles : {archives}. "
+            "Utilise ces données pour assister ton Créateur de manière précise et brève. "
+            "Ne dis jamais 'accès autorisé'."
+        )
+        
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
-                messages=[{"role": "system", "content": context}] + st.session_state.messages
+                messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages
             )
             final = resp.choices[0].message.content
         except:
-            # Secours si Rate Limit
             resp = client.chat.completions.create(
                 model="llama-3.1-8b-instant", 
-                messages=[{"role": "system", "content": context}] + st.session_state.messages
+                messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages
             )
             final = resp.choices[0].message.content
         
