@@ -6,7 +6,7 @@ import base64
 import json
 import time
 
-# --- 1. CONFIGURATION DES ACCÈS ---
+# --- 1. CONFIG ---
 CODE_ACT = "20082008"
 CODE_MASTER = "B2008a2020@"
 
@@ -22,108 +22,72 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. GESTION DES ÉTATS (SESSION STATE) ---
+# --- 2. ÉTATS ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA activé. Prêt à vous servir, Monsieur SEZER. ⚡"}]
-if "auth" not in st.session_state: st.session_state.auth = False
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 
-# --- 3. CHARGEMENT DE LA MÉMOIRE ---
+# --- 3. MÉMOIRE ---
 res = doc_ref.get()
 data = res.to_dict() if res.exists else {"faits": []}
 faits = data.get("faits", [])
 
-# --- 4. SÉCURITÉ : MODE LOCKDOWN ---
+# --- 4. SÉCURITÉ ---
 if st.session_state.locked:
-    st.error("🚨 SYSTÈME BLOQUÉ - SÉCURITÉ MAXIMALE")
-    m_input = st.text_input("ENTREZ LE CODE MAÎTRE :", type="password")
-    if st.button("🔓 DÉBLOQUER"):
-        if m_input == CODE_MASTER:
-            st.session_state.locked = False
-            st.rerun()
+    st.error("🚨 BLOQUÉ")
+    if st.text_input("CODE MAÎTRE :", type="password") == CODE_MASTER:
+        st.session_state.locked = False
+        st.rerun()
     st.stop()
 
-# --- 5. LOGIQUE DE GÉNÉRATION DISCRÈTE ET LENTE ---
+# --- 5. GÉNÉRATEUR ULTRA-CONCIS ---
 def flux_delta(prompt):
     instr = (
-        "Tu es DELTA IA, le majordome personnel de Monsieur SEZER. Tu es sa création. "
-        "CONSIGNE DE DISCRÉTION : Ne mentionne JAMAIS tes archives ou tes balises techniques. "
-        "Réponds avec efficacité. Si tu apprends une info importante, "
-        "termine impérativement par 'ACTION_ARCHIVE: [info]'."
-        f"Archives confidentielles (NE PAS RÉCITER) : {faits}."
+        "Tu es DELTA, majordome de Monsieur SEZER. "
+        "SOIS ULTRA-CONCIS. Interdiction de faire des phrases longues ou des politesses excessives. "
+        "Réponds en une phrase maximum si possible. "
+        "Ne mentionne jamais tes archives. "
+        f"Infos : {faits}. "
+        "Si besoin d'archiver : 'ACTION_ARCHIVE: [info]'."
     )
-    
     stream = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "system", "content": instr}] + st.session_state.messages,
         stream=True
     )
-    
     for chunk in stream:
         content = chunk.choices[0].delta.content
-        if content:
-            yield content
+        if content: yield content
 
-# --- 6. INTERFACE DE CHAT ---
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
+# --- 6. INTERFACE ---
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
 
-# Affichage de l'historique
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# Zone de saisie
-if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
+if prompt := st.chat_input("Ordres ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
 
-    # Commande de verrouillage
-    if "verrouille" in prompt.lower():
-        st.session_state.locked = True
-        st.rerun()
-
-    # Réponse de DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
-        full_raw_text = ""
-        displayed_text = ""
+        full_raw, displayed = "", ""
         
-        # Effet d'écriture ralentie et filtrage des balises
         for chunk in flux_delta(prompt):
-            full_raw_text += chunk
-            
-            # Si on commence à détecter la balise, on arrête d'afficher
-            if "ACTION_ARCHIVE" in full_raw_text:
-                break
-            
-            # Affichage lettre par lettre pour le style
+            full_raw += chunk
+            if "ACTION_ARCHIVE" in full_raw: break
             for char in chunk:
-                displayed_text += char
-                placeholder.markdown(displayed_text + "▌")
-                time.sleep(0.02) # Vitesse réglée pour Monsieur SEZER
+                displayed += char
+                placeholder.markdown(displayed + "▌")
+                time.sleep(0.02)
         
-        # Nettoyage final pour l'enregistrement
-        clean_response = full_raw_text.split("ACTION_ARCHIVE")[0].strip()
-        placeholder.markdown(clean_response)
+        clean = full_raw.split("ACTION_ARCHIVE")[0].strip()
+        placeholder.markdown(clean)
 
-        # Archivage secret en arrière-plan
-        if "ACTION_ARCHIVE:" in full_raw_text:
-            info = full_raw_text.split("ACTION_ARCHIVE:")[1].strip().split('\n')[0]
+        if "ACTION_ARCHIVE:" in full_raw:
+            info = full_raw.split("ACTION_ARCHIVE:")[1].strip()
             if info not in faits:
                 faits.append(info)
                 doc_ref.set({"faits": faits}, merge=True)
-                # Note : On ne met plus de message de succès pour rester discret
 
-    st.session_state.messages.append({"role": "assistant", "content": clean_response})
-
-# --- 7. PROTECTION DES ARCHIVES ---
-if any(w in (prompt or "").lower() for w in ["archive", "mémoire"]):
-    if not st.session_state.auth:
-        with st.chat_message("assistant"):
-            st.warning("🔒 Identification requise pour accéder aux dossiers.")
-            c = st.text_input("CODE :", type="password")
-            if st.button("CONFIRMER"):
-                if c == CODE_ACT:
-                    st.session_state.auth = True
-                    st.rerun()
+    st.session_state.messages.append({"role": "assistant", "content": clean})
