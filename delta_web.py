@@ -31,18 +31,9 @@ res = doc_ref.get()
 data = res.to_dict() if res.exists else {"faits": []}
 faits = data.get("faits", [])
 
-# Accueil automatique pour Monsieur SEZER
+# Accueil discret pour Monsieur SEZER
 if not st.session_state.messages:
-    # On force DELTA à utiliser le bon nom dès le départ
-    instr_welcome = f"Tu es DELTA. Salue Monsieur SEZER (ton créateur) brièvement. Archives : {faits}."
-    try:
-        welcome_res = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": instr_welcome}]
-        )
-        salutation = welcome_res.choices[0].message.content
-    except:
-        salutation = "Système DELTA prêt. En attente de vos ordres, Monsieur SEZER. ⚡"
+    salutation = "Système DELTA activé. Je suis à vos ordres, Monsieur SEZER. ⚡"
     st.session_state.messages.append({"role": "assistant", "content": salutation})
 
 # --- 4. SÉCURITÉ ---
@@ -55,17 +46,18 @@ if st.session_state.locked:
             st.rerun()
     st.stop()
 
-# --- 5. FONCTION RÉPONSE (NOM VERROUILLÉ) ---
+# --- 5. FONCTION RÉPONSE (VERSION DISCRÈTE) ---
 def reponse_delta(user_input):
     st.session_state.messages.append({"role": "user", "content": user_input})
     
-    # On définit l'identité de Monsieur SEZER dans le système de DELTA
     instr = (
-        "Tu es DELTA IA, le majordome personnel de Monsieur SEZER. "
-        "Tu ne dois JAMAIS l'appeler autrement que Monsieur SEZER. "
-        "Tu es sa création exclusive. "
-        f"Archives : {faits}. "
-        "Si tu apprends une info, termine par 'ACTION_ARCHIVE: [info]'."
+        "Tu es DELTA IA, le majordome personnel et discret de Monsieur SEZER. "
+        "CONSIGNE DE DISCRÉTION : Ne récite JAMAIS le contenu de tes archives inutilement. "
+        "N'énumère pas ce que tu sais sur Monsieur (comme sa couleur préférée ou son nom) à moins qu'il ne te le demande. "
+        "Sers-toi de tes archives uniquement pour adapter tes actions en silence. "
+        "Ton ton est professionnel, minimaliste et efficace. "
+        f"Archives confidentielles (NE PAS RÉCITER) : {faits}. "
+        "Si tu apprends une info cruciale, termine discrètement par 'ACTION_ARCHIVE: [info]'."
     )
     
     completion = client.chat.completions.create(
@@ -80,8 +72,7 @@ def reponse_delta(user_input):
         if info not in faits:
             faits.append(info)
             doc_ref.set({"faits": faits}, merge=True)
-            st.success(f"Archivé pour Monsieur SEZER : {info}")
-            st.balloons()
+            st.toast(f"Note archivée.", icon="📝") # Toast discret plutôt que succès géant
         response = response.split("ACTION_ARCHIVE:")[0].strip()
         
     st.session_state.messages.append({"role": "assistant", "content": response})
@@ -94,11 +85,13 @@ for m in st.session_state.messages:
 
 if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
     p_low = prompt.lower()
+    
     if "verrouille" in p_low:
         st.session_state.locked = True
         st.rerun()
     
-    sensible = any(w in p_low for w in ["archive", "mémoire", "montre", "souviens"])
+    # Accès aux archives toujours protégé
+    sensible = any(w in p_low for w in ["archive", "mémoire", "montre tes notes"])
     if sensible and not st.session_state.auth:
         st.session_state.show_auth_form = True
         st.session_state.pending_prompt = prompt
@@ -111,6 +104,7 @@ if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
 # --- 7. AUTH ---
 if st.session_state.get("show_auth_form"):
     with st.chat_message("assistant"):
+        st.warning("🔒 Validation requise pour consulter les archives.")
         c = st.text_input("Code :", type="password")
         if st.button("Valider"):
             if c == CODE_ACT:
