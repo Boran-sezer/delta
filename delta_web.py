@@ -1,77 +1,76 @@
 import streamlit as st
 from groq import Groq
 
-# --- 1. CONFIGURATION DES CODES (A déplacer dans st.secrets plus tard) ---
-CODE_ACTION = "20082008"
-CODE_MAITRE = "B2008a2020@"
+# --- 1. CONFIGURATION DES CODES ---
+# (Note : Ne les donnez pas à l'IA dans le prompt !)
+CODE_ACT = "20082008"
+CODE_MASTER = "B2008a2020@"
 
-# --- 2. INITIALISATION DES ÉTATS (Le cerveau de l'app) ---
+# --- 2. INITIALISATION DU CERVEAU (SESSION STATE) ---
 if "locked" not in st.session_state: st.session_state.locked = False
 if "auth" not in st.session_state: st.session_state.auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
 if "messages" not in st.session_state: st.session_state.messages = []
-if "attente_code" not in st.session_state: st.session_state.attente_code = False
+if "show_auth_form" not in st.session_state: st.session_state.show_auth_form = False
 
-# --- 3. ÉCRAN DE VERROUILLAGE TOTAL (LOCKDOWN) ---
+# --- 3. SÉCURITÉ MAXIMALE (MODE LOCKDOWN) ---
 if st.session_state.locked:
     st.error("🚨 SYSTÈME BLOQUÉ - SÉCURITÉ MAXIMALE")
-    unlock = st.text_input("Entrez le code MAÎTRE (B...)", type="password")
-    if st.button("DÉVERROUILLER LE NOYAU"):
-        if unlock == CODE_MAITRE:
+    m_input = st.text_input("ENTREZ LE CODE MAÎTRE :", type="password", key="master_key")
+    if st.button("DÉVERROUILLER"):
+        if m_input == CODE_MASTER:
             st.session_state.locked = False
             st.session_state.essais = 0
-            st.success("Système rétabli.")
+            st.success("Système rétabli, Monsieur Boran. Initialisation...")
             st.rerun()
         else:
-            st.error("Code incorrect.")
-    st.stop() # Arrête tout le reste ici
+            st.error("CODE MAÎTRE INCORRECT.")
+    st.stop() # RIEN ne s'affiche en dessous tant que c'est bloqué
 
-# --- 4. INTERFACE PRINCIPALE ---
+# --- 4. INTERFACE DE CHAT ---
 st.title("⚡ DELTA IA")
 
-# Affichage du chat historique
+# Affichage des messages passés
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. ZONE DE SAISIE ET LOGIQUE ---
-prompt = st.chat_input("Ordres...")
-
-if prompt:
-    # On détecte si c'est une demande sensible
-    actions_privees = ["archive", "mémoire", "effacer", "supprimer", "montre"]
-    is_sensible = any(x in prompt.lower() for x in actions_privees)
+# --- 5. LOGIQUE DE VÉRIFICATION ---
+if prompt := st.chat_input("Quels sont vos ordres ?"):
+    # On détecte si l'action est sensible
+    sensible = any(word in prompt.lower() for word in ["archive", "mémoire", "effacer", "supprimer"])
     
-    # On détecte si vous demandez le verrouillage manuel
+    # Demande de verrouillage manuel
     if "verrouille" in prompt.lower():
         st.session_state.locked = True
         st.rerun()
 
-    if is_sensible and not st.session_state.auth:
-        st.session_state.attente_code = True
-        st.session_state.dernier_prompt = prompt # On garde l'idée en mémoire
+    if sensible and not st.session_state.auth:
+        st.session_state.show_auth_form = True
+        st.session_state.pending_msg = prompt # On garde l'ordre au chaud
     else:
-        # Réponse IA normale
+        # Traitement normal (Groq)
         st.session_state.messages.append({"role": "user", "content": prompt})
-        # Simulation réponse IA (Remplacez par votre appel Groq)
-        reponse = "Je traite votre demande..." 
-        st.session_state.messages.append({"role": "assistant", "content": reponse})
+        # ICI VOUS METTREZ VOTRE APPEL GROQ
+        st.session_state.messages.append({"role": "assistant", "content": "Ordre reçu. Je traite la demande."})
         st.rerun()
 
-# --- 6. LE POP-UP DE SÉCURITÉ (S'affiche par-dessus le reste) ---
-if st.session_state.attente_code:
+# --- 6. LE FORMULAIRE DE CODE (S'affiche si besoin) ---
+if st.session_state.show_auth_form:
     with st.chat_message("assistant"):
-        st.warning("🔒 Action protégée. Veuillez entrer le code d'action.")
-        c = st.text_input("Code (2008...) :", type="password", key="pwd_zone")
-        if st.button("Valider l'accès"):
-            if c == CODE_ACTION:
+        st.warning("🔒 Action protégée. Veuillez entrer le code d'action (2008...).")
+        c = st.text_input("CODE :", type="password", key="action_key")
+        
+        if st.button("VALIDER"):
+            if c == CODE_ACT:
                 st.session_state.auth = True
-                st.session_state.attente_code = False
-                st.success("Accès autorisé. Répétez votre commande, Monsieur.")
+                st.session_state.show_auth_form = False
+                st.success("Accès autorisé.")
+                # On peut maintenant traiter le message "pending_msg"
                 st.rerun()
             else:
                 st.session_state.essais += 1
                 if st.session_state.essais >= 3:
                     st.session_state.locked = True
                     st.rerun()
-                st.error(f"Erreur ({st.session_state.essais}/3)")
+                st.error(f"CODE INCORRECT ({st.session_state.essais}/3)")
