@@ -22,7 +22,7 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA prêt, Monsieur Sezer. Prêt pour le nettoyage des archives. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA prêt. Prêt à restructurer vos données, Monsieur Sezer. ⚡"}]
 
 # --- 3. INTERFACE & SIDEBAR ---
 st.set_page_config(page_title="DELTA", layout="wide")
@@ -45,22 +45,18 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. LOGIQUE DE SUPPRESSION ET MODIFICATION ---
-if prompt := st.chat_input("Ordres en attente..."):
+# --- 4. LOGIQUE DE MODIFICATION AVANCÉE ---
+if prompt := st.chat_input("Modifiez vos archives ici..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # ANALYSE RENFORCÉE POUR LA SUPPRESSION
+    # ANALYSE DE L'ACTION DE MISE À JOUR
     analyse_prompt = (
-        f"Archives actuelles : {archives}. "
+        f"Archives : {archives}. "
         f"Ordre : '{prompt}'. "
-        "Tu dois extraire l'action de suppression ou modification. "
-        "Réponds UNIQUEMENT par ce JSON : "
-        "{'action': 'delete_partie' (si on veut supprimer une catégorie), "
-        "'delete_info' (si on veut enlever une ligne précise), "
-        "'add' (si ajout), "
-        "'target': 'nom_de_la_partie_ou_info'} "
+        "Si l'utilisateur veut MODIFIER une info existante, réponds UNIQUEMENT ce JSON : "
+        "{'action': 'update_info', 'partie': 'nom_de_la_partie', 'old_info': 'texte_exact_a_remplacer', 'new_info': 'nouveau_texte'}. "
         "Sinon réponds 'NON'."
     )
     
@@ -72,32 +68,21 @@ if prompt := st.chat_input("Ordres en attente..."):
         if json_match:
             data = json.loads(json_match.group(0).replace("'", '"'))
             action = data.get('action')
-            target = data.get('target')
             modif = False
 
-            # LOGIQUE DE SUPPRESSION DE CATÉGORIE
-            if action == 'delete_partie':
-                # On cherche la partie qui ressemble le plus au nom donné
-                for k in list(archives.keys()):
-                    if target.lower() in k.lower() or k.lower() in target.lower():
-                        del archives[k]
-                        modif = True
-            
-            # LOGIQUE DE SUPPRESSION D'UNE INFO PRÉCISE
-            elif action == 'delete_info':
-                for k, v in archives.items():
-                    if target in v:
-                        v.remove(target)
-                        modif = True
-            
-            # AJOUT CLASSIQUE
-            elif action == 'add':
-                # (Logique d'ajout déjà fonctionnelle)
-                pass
+            if action == 'update_info':
+                partie = data.get('partie')
+                old = data.get('old_info')
+                new = data.get('new_info')
+                
+                if partie in archives and old in archives[partie]:
+                    idx = archives[partie].index(old)
+                    archives[partie][idx] = new
+                    modif = True
 
             if modif:
                 doc_ref.set({"archives": archives})
-                st.toast(f"🗑️ Suppression effectuée : {target}")
+                st.toast(f"✅ Information mise à jour.")
                 time.sleep(0.5)
                 st.rerun()
     except: pass
@@ -106,7 +91,7 @@ if prompt := st.chat_input("Ordres en attente..."):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_raw = ""
-        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives : {archives}. Ne dis jamais accès autorisé. Sois loyal."
+        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives : {archives}. Ne dis jamais accès autorisé."
 
         try:
             stream = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages, stream=True)
@@ -116,7 +101,7 @@ if prompt := st.chat_input("Ordres en attente..."):
                     full_raw += content
                     placeholder.markdown(full_raw + "▌")
         except:
-            full_raw = "Système surchargé, mais l'ordre a été traité, Monsieur Sezer. ⚡"
+            full_raw = "Mise à jour effectuée dans vos archives, Monsieur Sezer. ⚡"
         
         placeholder.markdown(full_raw)
         st.session_state.messages.append({"role": "assistant", "content": full_raw})
