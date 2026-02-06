@@ -24,7 +24,7 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel, Créateur. Prêt pour vos ordres. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel, Créateur. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
@@ -48,7 +48,7 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. AUTHENTIFICATION ---
+# --- 5. AUTHENTIFICATION (CORRIGÉE) ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
         if st.session_state.temp_text:
@@ -61,15 +61,15 @@ if st.session_state.pending_auth:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
                 
-                # RÉCUPÉRATION CIBLÉE APRÈS CODE
+                # RÉCUPÉRATION STRICTE
                 res = doc_ref.get()
                 faits = res.to_dict().get("faits", []) if res.exists else []
                 
-                # On demande à DELTA de répondre spécifiquement à la dernière question avec les faits
+                # Ici on force DELTA à être très spécifique
                 reponse_finale = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[
-                        {"role": "system", "content": f"Tu es DELTA. Tu as maintenant accès à ces archives : {faits}. Réponds PRÉCISÉMENT à la question du Créateur sans lister tout le reste, sauf s'il le demande."},
+                        {"role": "system", "content": f"Tu es DELTA. Tu as accès à ces faits : {faits}. RÉPONDS UNIQUEMENT à la dernière question de ton Créateur. NE FAIS PAS de liste de tes connaissances. Sois bref."},
                     ] + st.session_state.messages
                 )
                 
@@ -96,13 +96,11 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
             placeholder = st.empty()
             full_raw, displayed = "", ""
             
-            res = doc_ref.get()
-            faits = res.to_dict().get("faits", []) if res.exists else []
-            
+            # On ne lui donne PAS les faits ici, juste l'ordre de demander le code s'il en a besoin
             instr = (
                 "Tu es DELTA, le majordome de Monsieur SEZER (ton Créateur). "
-                "Tu connais l'existence de tes archives mais tu ne peux pas lire leur contenu précis sans code. "
-                "Si la question nécessite de fouiller dans les archives (ex: âge, voiture, préférences), réponds : REQUIS_CODE."
+                "Tu sais que tu as une mémoire verrouillée. Si la question porte sur une info personnelle de ton Créateur "
+                "que tu ne peux pas connaître sans ouvrir tes archives, réponds UNIQUEMENT : REQUIS_CODE."
             )
 
             stream = client.chat.completions.create(
