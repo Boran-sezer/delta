@@ -22,7 +22,7 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA prêt. Prêt à restructurer vos données, Monsieur Sezer. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA intégral prêt. Création, Modification et Suppression activées, Monsieur Sezer. ⚡"}]
 
 # --- 3. INTERFACE & SIDEBAR ---
 st.set_page_config(page_title="DELTA", layout="wide")
@@ -45,44 +45,67 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. LOGIQUE DE MODIFICATION AVANCÉE ---
-if prompt := st.chat_input("Modifiez vos archives ici..."):
+# --- 4. LE CERVEAU DE GESTION (CRÉER / MODIFIER / SUPPRIMER) ---
+if prompt := st.chat_input("Ordres pour vos archives..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # ANALYSE DE L'ACTION DE MISE À JOUR
+    # Analyse multi-actions
     analyse_prompt = (
-        f"Archives : {archives}. "
-        f"Ordre : '{prompt}'. "
-        "Si l'utilisateur veut MODIFIER une info existante, réponds UNIQUEMENT ce JSON : "
-        "{'action': 'update_info', 'partie': 'nom_de_la_partie', 'old_info': 'texte_exact_a_remplacer', 'new_info': 'nouveau_texte'}. "
+        f"Archives actuelles : {archives}. "
+        f"Ordre de Monsieur Sezer : '{prompt}'. "
+        "Tu es un gestionnaire de base de données. Réponds UNIQUEMENT en JSON : "
+        "1. Pour AJOUTER : {'action': 'add', 'partie': '...', 'info': '...'}"
+        "2. Pour SUPPRIMER une partie : {'action': 'delete_partie', 'target': '...'}"
+        "3. Pour SUPPRIMER une info : {'action': 'delete_info', 'partie': '...', 'info': '...'}"
+        "4. Pour MODIFIER : {'action': 'update', 'partie': '...', 'old': '...', 'new': '...'}"
         "Sinon réponds 'NON'."
     )
     
     try:
         check = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "user", "content": analyse_prompt}])
         cmd_text = check.choices[0].message.content.strip()
-        
         json_match = re.search(r'\{.*\}', cmd_text, re.DOTALL)
+        
         if json_match:
             data = json.loads(json_match.group(0).replace("'", '"'))
             action = data.get('action')
             modif = False
 
-            if action == 'update_info':
-                partie = data.get('partie')
-                old = data.get('old_info')
-                new = data.get('new_info')
-                
-                if partie in archives and old in archives[partie]:
-                    idx = archives[partie].index(old)
-                    archives[partie][idx] = new
+            # --- LOGIQUE D'AJOUT ---
+            if action == 'add':
+                p = data.get('partie', 'Général')
+                if p not in archives: archives[p] = []
+                archives[p].append(data.get('info'))
+                modif = True
+
+            # --- LOGIQUE DE SUPPRESSION PARTIE ---
+            elif action == 'delete_partie':
+                target = data.get('target')
+                for k in list(archives.keys()):
+                    if target.lower() in k.lower():
+                        del archives[k]
+                        modif = True
+
+            # --- LOGIQUE DE SUPPRESSION INFO ---
+            elif action == 'delete_info':
+                p, info = data.get('partie'), data.get('info')
+                if p in archives and info in archives[p]:
+                    archives[p].remove(info)
+                    modif = True
+
+            # --- LOGIQUE DE MODIFICATION ---
+            elif action == 'update':
+                p, old, new = data.get('partie'), data.get('old'), data.get('new')
+                if p in archives and old in archives[p]:
+                    idx = archives[p].index(old)
+                    archives[p][idx] = new
                     modif = True
 
             if modif:
                 doc_ref.set({"archives": archives})
-                st.toast(f"✅ Information mise à jour.")
+                st.toast(f"✅ Action {action} réussie")
                 time.sleep(0.5)
                 st.rerun()
     except: pass
@@ -91,7 +114,7 @@ if prompt := st.chat_input("Modifiez vos archives ici..."):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_raw = ""
-        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives : {archives}. Ne dis jamais accès autorisé."
+        instr = f"Tu es DELTA, l'IA de Monsieur Sezer. Archives : {archives}. Utilise 'Monsieur Sezer'. Sois bref."
 
         try:
             stream = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages, stream=True)
@@ -101,7 +124,7 @@ if prompt := st.chat_input("Modifiez vos archives ici..."):
                     full_raw += content
                     placeholder.markdown(full_raw + "▌")
         except:
-            full_raw = "Mise à jour effectuée dans vos archives, Monsieur Sezer. ⚡"
+            full_raw = "Ordre traité avec succès, Monsieur Sezer. ⚡"
         
         placeholder.markdown(full_raw)
         st.session_state.messages.append({"role": "assistant", "content": full_raw})
