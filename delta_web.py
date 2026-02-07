@@ -5,7 +5,7 @@ from firebase_admin import credentials, firestore
 import base64
 import json
 
-# --- 1. INITIALISATION ---
+# --- 1. INITIALISATION FIREBASE & API ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -23,60 +23,65 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA CORE V2", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : SYSTÈME NERVEUX</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA CORE V2", layout="wide", page_icon="⚡")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : SYSTÈME NERVEUX OPTIMISÉ</h1>", unsafe_allow_html=True)
 
-if "messages" not in st.session_state: st.session_state.messages = []
+if "messages" not in st.session_state: 
+    st.session_state.messages = []
+
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Ordres..."):
+if prompt := st.chat_input("En attente de vos ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # A. MISE À JOUR DE LA MÉMOIRE (L'IA gère son propre rangement)
+    # A. MISE À JOUR INTELLIGENTE (Filtre de pertinence)
     try:
-        # On lui demande de comparer le message avec l'existant pour corriger ou ajouter
+        # On demande à l'IA d'être juge de ce qui mérite d'être archivé
         task = (
             f"Archives actuelles : {archives}. "
             f"Nouveau message : {prompt}. "
-            "MISSION : Mets à jour les archives. Si une information change (ex: l'âge), remplace l'ancienne par la nouvelle. "
-            "Retourne UNIQUEMENT l'objet JSON complet et mis à jour."
+            "MISSION : Analyse si le message contient une information réelle sur Monsieur Sezer (goûts, âge, faits, corrections). "
+            "1. Si c'est du bruit (salutations, remerciements, phrases vides) : retourne l'objet 'archives' identique. "
+            "2. Si c'veut corriger ou ajouter une info : mets à jour et retourne le JSON complet. "
+            "Retourne UNIQUEMENT le JSON."
         )
         
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "system", "content": "Tu es la mémoire vive de DELTA. Tu corriges et mets à jour les faits."}, {"role": "user", "content": task}],
+            messages=[{"role": "system", "content": "Tu es le processeur sélectif de DELTA. Tu ignores le bruit et ne gardes que les faits."}, {"role": "user", "content": task}],
             response_format={"type": "json_object"}
         )
         nouvelles_archives = json.loads(check.choices[0].message.content)
         
-        # Si l'IA a modifié les archives, on enregistre
+        # Enregistrement si changement détecté
         if nouvelles_archives != archives:
             doc_ref.set({"archives": nouvelles_archives})
             archives = nouvelles_archives
-            st.toast("💾 Mémoire synchronisée")
+            st.toast("💾 Mémoire mise à jour", icon="✅")
     except: pass
 
-    # B. RÉPONSE DE DELTA
+    # B. RÉPONSE DE DELTA (Intelligence Supérieure)
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
-        # Instructions pour une réponse naturelle sur les infos
         instruction = (
-            f"Tu es DELTA, l'IA de Monsieur Sezer. Connaissances : {archives}. "
+            f"Tu es DELTA, l'IA de Monsieur Sezer. "
+            f"Données actuelles sur lui : {archives}. "
             "DIRECTIVES : "
-            "1. Si Monsieur Sezer demande ce que tu sais sur lui, liste les infos de façon claire (liste ou phrases) sans parler des catégories techniques ou du JSON. "
-            "2. Appelle-le toujours Monsieur Sezer. "
-            "3. Sois bref, intelligent et percutant. Pas de politesses."
+            "1. IDENTITÉ : Appelle-le toujours Monsieur Sezer. "
+            "2. RÉCAPITULATIF : S'il demande ce que tu sais, liste les faits de manière élégante (liste ou phrases), sans mentionner le stockage technique ou le JSON. "
+            "3. STYLE : Ton froid, efficace, technique. Ne sois pas trop poli."
         )
 
         try:
             stream = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages,
+                temperature=0.4,
                 stream=True
             )
             for chunk in stream:
@@ -86,7 +91,7 @@ if prompt := st.chat_input("Ordres..."):
                     placeholder.markdown(full_res + "▌")
             placeholder.markdown(full_res)
         except:
-            # Secours si quota atteint
+            # Fallback en cas de quota atteint
             resp = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages
