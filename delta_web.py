@@ -34,18 +34,11 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Ordres..."):
+if prompt := st.chat_input("Commandes..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # --- COMMANDE DE SUPPRESSION TOTALE ---
-    if any(keyword in prompt.lower() for keyword in ["supprime tout", "reset complet", "efface tout"]):
-        doc_ref.set({"archives": {}}) # Vide Firebase
-        st.session_state.messages = [] # Vide la session actuelle
-        st.toast("🚨 MÉMOIRE INTÉGRALEMENT EFFACÉE")
-        st.rerun()
-
-    # --- ARCHIVISTE SILENCIEUX ---
+    # --- ARCHIVISTE (PARTIE JSON CACHÉE) ---
     sys_analyse = (
         f"Tu es l'unité de gestion de données de Monsieur Sezer Boran. Mémoire : {archives}. "
         f"Dernier message : '{prompt}'. "
@@ -53,6 +46,7 @@ if prompt := st.chat_input("Ordres..."):
     )
     
     try:
+        # L'analyseur reste en JSON
         check = client.chat.completions.create(
             model="llama-3.3-70b-versatile", 
             messages=[{"role": "system", "content": "Moteur JSON discret."}, {"role": "user", "content": sys_analyse}],
@@ -60,33 +54,39 @@ if prompt := st.chat_input("Ordres..."):
             response_format={"type": "json_object"}
         )
         verdict = check.choices[0].message.content
-        json_match = re.search(r'\{.*\}', verdict, re.DOTALL)
-        if json_match:
-            nouvelles_archives = json.loads(json_match.group(0))
-            if nouvelles_archives != archives:
-                doc_ref.set({"archives": nouvelles_archives})
-                archives = nouvelles_archives
-                st.toast("⚙️ Sync") 
+        nouvelles_archives = json.loads(verdict)
+        if nouvelles_archives != archives:
+            doc_ref.set({"archives": nouvelles_archives})
+            archives = nouvelles_archives
+            st.toast("⚙️ Sync") 
     except: pass
 
-    # --- 5. RÉPONSE DE DELTA ---
+    # --- 5. RÉPONSE DE DELTA (PARTIE CONVERSATION NORMALE) ---
     with st.chat_message("assistant"):
+        # ICI : Pas de JSON, juste du texte pur
         instruction_delta = (
-            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. Connaissances : {archives}. "
-            "Ne parle jamais de tes processus de mémoire. Sois bref et technique."
+            f"Tu es DELTA. Tu parles à ton Créateur, Monsieur Sezer Boran. "
+            f"Archives connues : {archives}. "
+            "Réponds en FRANÇAIS. Ne réponds JAMAIS en JSON. Parle normalement. "
+            "Sois bref, technique et percutant."
         )
+        
         placeholder = st.empty()
         full_response = ""
         try:
+            # On retire 'response_format' pour la conversation
             stream = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
                 messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
-                temperature=0.3, stream=True
+                temperature=0.4, # On monte un peu la température pour plus de naturel
+                stream=True
             )
             for chunk in stream:
                 if chunk.choices[0].delta.content:
                     full_response += chunk.choices[0].delta.content
                     placeholder.markdown(full_response + "▌")
             placeholder.markdown(full_response)
-        except: placeholder.markdown("Erreur.")
+        except: 
+            placeholder.markdown("Erreur de liaison.")
+            
         st.session_state.messages.append({"role": "assistant", "content": full_response})
