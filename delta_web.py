@@ -39,7 +39,6 @@ if prompt := st.chat_input("Commandes, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Affichage des archives
     if "archive" in prompt.lower():
         with st.chat_message("assistant"):
             st.markdown("### 🗄️ GESTIONNAIRE DE MÉMOIRE")
@@ -48,21 +47,23 @@ if prompt := st.chat_input("Commandes, Monsieur Sezer..."):
                     for i, item in enumerate(items): st.write(f"{i+1}. {item}")
         st.stop()
 
-    # --- ANALYSEUR DE MÉMOIRE DYNAMIQUE ---
+    # --- ANALYSEUR DE MÉMOIRE FLEXIBLE ---
+    # Ici, on demande à l'IA de trouver l'info même si l'orthographe est différente
     sys_analyse = (
         f"Tu es l'architecte de mémoire de Monsieur Sezer. Archives : {archives}. "
         f"Ordre : '{prompt}'. "
-        "Réponds UNIQUEMENT en JSON avec une des actions suivantes :\n"
+        "Si l'utilisateur demande de supprimer ou déplacer, identifie l'info même si l'orthographe est imprécise. "
+        "Réponds UNIQUEMENT en JSON :\n"
         "1. {'action':'add', 'cat':'NOM', 'val':'INFO'}\n"
-        "2. {'action':'move', 'from':'NOM', 'to':'NOM', 'val':'INFO'}\n"
-        "3. {'action':'delete', 'cat':'NOM', 'val':'INFO'}\n"
-        "Si aucune action de mémoire n'est requise, réponds {'action':'none'}."
+        "2. {'action':'move', 'from':'NOM', 'to':'NOM', 'old_val':'INFO_EXACTE_DANS_ARCHIVE', 'new_val':'INFO'}\n"
+        "3. {'action':'delete', 'cat':'NOM', 'val':'INFO_EXACTE_DANS_ARCHIVE'}\n"
+        "Si aucune action, réponds {'action':'none'}."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Gestionnaire de base de données JSON."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Gestionnaire de données intelligent."}, {"role": "user", "content": sys_analyse}],
             temperature=0
         )
         match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
@@ -70,31 +71,28 @@ if prompt := st.chat_input("Commandes, Monsieur Sezer..."):
             data = json.loads(match.group(0).replace("'", '"'))
             action = data.get('action')
             
-            # Action ADD
             if action == 'add':
                 c, v = data.get('cat'), data.get('val')
                 if c not in archives: archives[c] = []
                 if v not in archives[c]: 
                     archives[c].append(v)
-                    st.toast(f"✅ Ajouté à {c}")
+                    st.toast(f"✅ Enregistré")
             
-            # Action MOVE
             elif action == 'move':
-                f, t, v = data.get('from'), data.get('to'), data.get('val')
-                if f in archives and v in archives[f]:
-                    archives[f].remove(v)
+                f, t, ov, nv = data.get('from'), data.get('to'), data.get('old_val'), data.get('new_val')
+                if f in archives and ov in archives[f]:
+                    archives[f].remove(ov)
                     if not archives[f]: del archives[f]
                     if t not in archives: archives[t] = []
-                    archives[t].append(v)
-                    st.toast(f"🔄 Déplacé vers {t}")
+                    archives[t].append(nv)
+                    st.toast(f"🔄 Déplacé")
             
-            # Action DELETE
             elif action == 'delete':
                 c, v = data.get('cat'), data.get('val')
                 if c in archives and v in archives[c]:
                     archives[c].remove(v)
                     if not archives[c]: del archives[c]
-                    st.toast(f"🗑️ Supprimé de {c}")
+                    st.toast(f"🗑️ Supprimé")
             
             if action != 'none':
                 doc_ref.set({"archives": archives})
