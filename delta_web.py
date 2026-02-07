@@ -5,6 +5,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import base64
 import json
+from datetime import datetime
 
 # --- CONFIGURATION API ---
 GROQ_API_KEY = "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"
@@ -22,7 +23,7 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- FONCTION RECHERCHE WEB SILENCIEUSE ---
+# --- FONCTIONS SYSTÈME ---
 def web_lookup(query):
     try:
         with DDGS() as ddgs:
@@ -30,25 +31,22 @@ def web_lookup(query):
             return "\n".join([f"[{r['title']}]: {r['body']}" for r in results]) if results else ""
     except: return ""
 
+def get_system_info():
+    """Récupère l'heure, la date et la localisation par défaut."""
+    now = datetime.now()
+    return {
+        "date": now.strftime("%A %d %B %Y"),
+        "heure": now.strftime("%H:%M"),
+        "localisation": "Annecy, France"  # Localisation configurée par défaut
+    }
+
 # --- CHARGEMENT DE LA MÉMOIRE ---
 res = doc_ref.get()
 memoire = res.to_dict() if res.exists else {"profil": {}, "projets": {}, "divers": {}}
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA", layout="wide")
-st.markdown("""
-    <style>
-    button {display:none;} 
-    #MainMenu, footer, header {visibility:hidden;} 
-    .title-delta {
-        font-family:'Inter'; font-weight:800; 
-        font-size:clamp(2.5rem, 10vw, 4rem); 
-        text-align:center; letter-spacing:-3px; margin-top:-60px;
-    }
-    .stChatMessage { border-radius: 15px; margin-bottom: 12px; border: 1px solid rgba(128, 128, 128, 0.1); }
-    </style>
-""", unsafe_allow_html=True)
-
+st.markdown("<style>button {display:none;} #MainMenu, footer, header {visibility:hidden;} .title-delta {font-family:'Inter'; font-weight:800; font-size:clamp(2.5rem, 10vw, 4rem); text-align:center; letter-spacing:-3px; margin-top:-60px;}</style>", unsafe_allow_html=True)
 st.markdown('<h1 class="title-delta">DELTA</h1>', unsafe_allow_html=True)
 
 if "messages" not in st.session_state: st.session_state.messages = []
@@ -60,8 +58,11 @@ if prompt := st.chat_input("À votre service..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. Analyse et Recherche Web invisible
-    decision_prompt = f"L'utilisateur demande : '{prompt}'. Faut-il faire une recherche web ? Répondre par OUI ou NON."
+    # 1. Données Temporelles et Géographiques
+    sys_info = get_system_info()
+    
+    # 2. Analyse et Recherche Web invisible
+    decision_prompt = f"Contexte : {sys_info}. Question : '{prompt}'. Recherche web nécessaire ? OUI/NON."
     try:
         search_needed = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
@@ -71,9 +72,9 @@ if prompt := st.chat_input("À votre service..."):
     
     web_data = ""
     if "OUI" in search_needed.upper():
-        web_data = web_lookup(prompt)
+        web_data = web_lookup(f"{prompt} à {sys_info['localisation']} le {sys_info['date']}")
 
-    # 2. Mise à jour Mémoire Silencieuse
+    # 3. Mise à jour Mémoire Silencieuse
     try:
         m_upd = f"Mémoire: {json.dumps(memoire)}. Info: {prompt}. Mets à jour le JSON."
         check = client.chat.completions.create(
@@ -85,20 +86,22 @@ if prompt := st.chat_input("À votre service..."):
         doc_ref.set(memoire, merge=True)
     except: pass
 
-    # 3. Réponse de DELTA (Identité forcée par défaut)
+    # 4. Réponse de DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
-        # Injection forcée de l'identité dans chaque contexte de réponse
-        context = f"IDENTITÉ : Tu parles à Monsieur Sezer (Sezer Boran), ton créateur. Connaissances : {json.dumps(memoire)}. Web : {web_data}."
+        context = (
+            f"IDENTITÉ : Monsieur Sezer. "
+            f"SYSTÈME : Date: {sys_info['date']}, Heure: {sys_info['heure']}, Lieu: {sys_info['localisation']}. "
+            f"MÉMOIRE : {json.dumps(memoire)}. WEB : {web_data}."
+        )
         
         sys_instr = (
             f"Tu es DELTA, l'IA de Monsieur Sezer. {context}. "
-            "1. Tu sais par défaut que ton interlocuteur est Monsieur Sezer. "
-            "2. Sois très poli, distingué et CONCIS. "
-            "3. N'affiche aucune étape de recherche. "
-            "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
+            "1. Très poli, distingué, CONCIS. "
+            "2. Utilise l'heure et le lieu naturellement (ex: 'Bonsoir Monsieur Sezer' s'il est tard). "
+            "3. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
         )
 
         stream = client.chat.completions.create(
