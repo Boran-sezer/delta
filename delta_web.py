@@ -40,7 +40,7 @@ if prompt := st.chat_input("Commandes..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Commande Archive (Accès libre désormais)
+    # Commande Archive (Accès libre)
     if "archive" in prompt.lower():
         with st.chat_message("assistant"):
             st.markdown("### 🗄️ BASE DE DONNÉES")
@@ -73,7 +73,7 @@ if prompt := st.chat_input("Commandes..."):
 
     # Réponse DELTA
     with st.chat_message("assistant"):
-        instruction_delta = f"Tu es DELTA. Mémoire : {archives}. Bref."
+        instruction_delta = f"Tu es DELTA. Créateur : Monsieur Sezer Boran. Mémoire : {archives}. Bref."
         placeholder = st.empty()
         full_response = ""
         try:
@@ -90,4 +90,3 @@ if prompt := st.chat_input("Commandes..."):
         except:
             placeholder.markdown("Erreur.")
         st.session_state.messages.append({"role": "assistant", "content": full_response})
-``` 🦾🚀✨
