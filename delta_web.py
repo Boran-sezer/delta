@@ -7,10 +7,10 @@ import base64
 import json
 
 # --- CONFIGURATION API ---
-GROQ_API_KEY = "votre_cle_groq"
+# Utilisation de votre clé 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
+GROQ_API_KEY = "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"
 
 # --- INITIALISATION FIREBASE ---
-# Le système se connecte à vos archives dès l'ouverture
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -23,7 +23,7 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- FONCTION RECHERCHE WEB (GRATUITE & ILLIMITÉE) ---
+# --- FONCTION RECHERCHE WEB (ILLIMITÉE) ---
 def web_lookup(query):
     try:
         with DDGS() as ddgs:
@@ -31,12 +31,11 @@ def web_lookup(query):
             return "\n".join([f"[{r['title']}]: {r['body']}" for r in results]) if results else ""
     except: return ""
 
-# --- CHARGEMENT DE LA MÉMOIRE (IDENTITÉ) ---
+# --- CHARGEMENT DE LA MÉMOIRE ---
 res = doc_ref.get()
-# Vos données sont conservées ici pour que DELTA sache qui vous êtes immédiatement
 memoire = res.to_dict() if res.exists else {"profil": {}, "projets": {}, "divers": {}}
 
-# --- INTERFACE ADAPTATIVE ---
+# --- INTERFACE ---
 st.set_page_config(page_title="DELTA", layout="wide")
 st.markdown("""
     <style>
@@ -57,41 +56,49 @@ if "messages" not in st.session_state: st.session_state.messages = []
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- TRAITEMENT DES REQUÊTES ---
+# --- TRAITEMENT ---
 if prompt := st.chat_input("À votre service, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
     # 1. Analyse du besoin Web
     decision_prompt = f"L'utilisateur demande : '{prompt}'. Faut-il faire une recherche web ? Répondre par OUI ou NON."
-    search_needed = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"user", "content": decision_prompt}]).choices[0].message.content
+    try:
+        search_needed = client.chat.completions.create(
+            model="llama-3.1-8b-instant", 
+            messages=[{"role":"user", "content": decision_prompt}]
+        ).choices[0].message.content
+    except: search_needed = "NON"
     
     web_data = ""
     if "OUI" in search_needed.upper():
         with st.status("Recherche en cours...", expanded=False):
             web_data = web_lookup(prompt)
 
-    # 2. Mise à jour de la mémoire (Apprentissage continu)
+    # 2. Mise à jour Mémoire
     try:
-        m_upd = f"Mémoire: {json.dumps(memoire)}. Message: {prompt}. Mets à jour le JSON pour ne rien oublier de Monsieur Sezer."
-        check = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"system","content":"JSON only."},{"role":"user","content":m_upd}], response_format={"type":"json_object"})
+        m_upd = f"Mémoire: {json.dumps(memoire)}. Info: {prompt}. Mets à jour le JSON."
+        check = client.chat.completions.create(
+            model="llama-3.1-8b-instant", 
+            messages=[{"role":"system","content":"JSON only."},{"role":"user","content":m_upd}], 
+            response_format={"type":"json_object"}
+        )
         memoire = json.loads(check.choices[0].message.content)
         doc_ref.set(memoire, merge=True)
     except: pass
 
-    # 3. Réponse de DELTA (Identité forte)
+    # 3. Réponse de DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
-        context = f"Identité créateur : Monsieur Sezer (Boran). Connaissances : {json.dumps(memoire)}. Web : {web_data}."
+        context = f"Identité créateur : Monsieur Sezer. Connaissances : {json.dumps(memoire)}. Web : {web_data}."
         
         sys_instr = (
-            f"Tu es DELTA, l'IA personnelle de Monsieur Sezer. {context}. "
-            "DIRECTIVES : "
-            "1. Tu sais que Monsieur Sezer est ton créateur. Sois très poli et distingué. "
-            "2. Sois extrêmement CONCIS. "
-            "3. Utilise ta mémoire et le web de façon fluide sans jamais les citer. "
-            "4. Adresse-toi à lui comme 'Monsieur Sezer'. Ne termine par son nom que si tu ne l'as pas cité avant."
+            f"Tu es DELTA, l'IA de Monsieur Sezer. {context}. "
+            "1. Très poli, distingué, CONCIS. "
+            "2. Tu es fier d'être la création de Monsieur Sezer. "
+            "3. Utilise le web et la mémoire sans les citer. "
+            "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
         )
 
         stream = client.chat.completions.create(
