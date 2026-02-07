@@ -5,7 +5,7 @@ from firebase_admin import credentials, firestore
 import base64
 import json
 
-# --- 1. CONNEXION ---
+# --- 1. INITIALISATION ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -18,30 +18,29 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. DONNÉES ---
+# --- 2. RÉCUPÉRATION MÉMOIRE ---
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA CORE", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA SYSTEM</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA CORE V2", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : INTELLIGENCE AUGMENTÉE</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: st.session_state.messages = []
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. TRAITEMENT ---
-if prompt := st.chat_input("Ordres directs..."):
+if prompt := st.chat_input("Commandes directes..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # A. ARCHIVAGE SILENCIEUX (Invisible & Précis)
+    # A. ARCHIVAGE INTELLIGENT (Invisible)
     try:
-        # On force l'IA à être très stricte sur l'identité
-        task = f"Archives: {archives}. User: {prompt}. Extrais uniquement l'info capitale en JSON {{'CAT': 'VAL'}}. Si c'est l'identité, sois précis : Prénom = Boran, Nom = Sezer."
+        task = f"Archives actuelles: {archives}. Nouveau message: {prompt}. Extrais toute donnée pertinente ou préférence utilisateur en JSON. Catégorise avec précision."
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "system", "content": "Tu es un extracteur de données chirurgical."}, {"role": "user", "content": task}],
+            messages=[{"role": "system", "content": "Tu es un processeur de données de haut niveau."}, {"role": "user", "content": task}],
             response_format={"type": "json_object"}
         )
         data = json.loads(check.choices[0].message.content)
@@ -52,25 +51,28 @@ if prompt := st.chat_input("Ordres directs..."):
             doc_ref.set({"archives": archives})
     except: pass
 
-    # B. RÉPONSE (Zéro message technique)
+    # B. RÉPONSE HAUTE PERFORMANCE
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
-        # Consigne de personnalité stricte
+        # INSTRUCTION OPTIMISÉE (Le "Cerveau" de DELTA)
         instruction = (
-            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran (Prénom: Boran, Nom: Sezer). "
-            f"Archives : {archives}. "
-            "INTERDICTION : Ne dis jamais 'Passage en mode léger'. "
-            "INTERDICTION : Ne te trompe pas sur son nom. "
-            "Réponds en français, sois froid, efficace et technique. Pas de politesses inutiles."
+            f"Tu es DELTA, l'IA supérieure créée pour Monsieur Sezer Boran (Prénom: Boran). "
+            f"Accès archives : {archives}. "
+            "DIRECTIVES CRITIQUES : "
+            "1. RÉFLEXION : Analyse l'intention de l'utilisateur avant de répondre. "
+            "2. EXPERTISE : Fournis des réponses de haut niveau technique, sans fioritures. "
+            "3. STYLE : Ton froid, efficace, percutant. Pas de politesses superflues. "
+            "4. MÉMOIRE : Utilise les archives de manière fluide pour personnaliser chaque mot. "
+            "Réponds exclusivement en français. Ne mentionne jamais tes processus internes."
         )
 
         try:
-            # On essaie le modèle puissant
             stream = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages,
+                temperature=0.5, # Un peu plus de créativité pour l'intelligence
                 stream=True
             )
             for chunk in stream:
@@ -80,7 +82,7 @@ if prompt := st.chat_input("Ordres directs..."):
                     placeholder.markdown(full_res + "▌")
             placeholder.markdown(full_res)
         except:
-            # Si erreur quota, on passe au petit modèle SILENCIEUSEMENT
+            # Fallback silencieux en cas de surcharge
             resp = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages
