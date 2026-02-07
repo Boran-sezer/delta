@@ -34,22 +34,20 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Commandes..."):
+if prompt := st.chat_input("Ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # --- ARCHIVISTE (PARTIE JSON CACHÉE) ---
-    sys_analyse = (
-        f"Tu es l'unité de gestion de données de Monsieur Sezer Boran. Mémoire : {archives}. "
-        f"Dernier message : '{prompt}'. "
-        "MISSION : Analyse et range l'info par catégories. Réponds EXCLUSIVEMENT avec le JSON complet."
-    )
-    
+    # --- ARCHIVISTE (DANS UN BLOC SÉPARÉ) ---
     try:
-        # L'analyseur reste en JSON
+        sys_analyse = (
+            f"Tu es l'unité de gestion de données de Monsieur Sezer Boran. Mémoire : {archives}. "
+            f"Dernier message : '{prompt}'. "
+            "Réponds UNIQUEMENT avec l'objet JSON complet des archives mis à jour."
+        )
         check = client.chat.completions.create(
             model="llama-3.3-70b-versatile", 
-            messages=[{"role": "system", "content": "Moteur JSON discret."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Moteur JSON."}, {"role": "user", "content": sys_analyse}],
             temperature=0,
             response_format={"type": "json_object"}
         )
@@ -58,35 +56,33 @@ if prompt := st.chat_input("Commandes..."):
         if nouvelles_archives != archives:
             doc_ref.set({"archives": nouvelles_archives})
             archives = nouvelles_archives
-            st.toast("⚙️ Sync") 
-    except: pass
+            st.toast("⚙️ Sync")
+    except:
+        pass # Si l'archivage échoue, on continue quand même la discussion
 
-    # --- 5. RÉPONSE DE DELTA (PARTIE CONVERSATION NORMALE) ---
+    # --- 5. RÉPONSE DE DELTA ---
     with st.chat_message("assistant"):
-        # ICI : Pas de JSON, juste du texte pur
         instruction_delta = (
-            f"Tu es DELTA. Tu parles à ton Créateur, Monsieur Sezer Boran. "
-            f"Archives connues : {archives}. "
-            "Réponds en FRANÇAIS. Ne réponds JAMAIS en JSON. Parle normalement. "
-            "Sois bref, technique et percutant."
+            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. "
+            f"Connaissances : {archives}. "
+            "Réponds en FRANÇAIS, de manière brève et technique. Ne parle pas de tes archives."
         )
         
         placeholder = st.empty()
         full_response = ""
-        try:
-            # On retire 'response_format' pour la conversation
-            stream = client.chat.completions.create(
-                model="llama-3.3-70b-versatile", 
-                messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
-                temperature=0.4, # On monte un peu la température pour plus de naturel
-                stream=True
-            )
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    full_response += chunk.choices[0].delta.content
-                    placeholder.markdown(full_response + "▌")
-            placeholder.markdown(full_response)
-        except: 
-            placeholder.markdown("Erreur de liaison.")
-            
+        
+        # Appel simplifié sans trop de paramètres
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile", 
+            messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
+            stream=True
+        )
+        
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                full_response += content
+                placeholder.markdown(full_response + "▌")
+        
+        placeholder.markdown(full_response)
         st.session_state.messages.append({"role": "assistant", "content": full_response})
