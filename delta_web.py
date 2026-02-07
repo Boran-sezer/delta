@@ -16,9 +16,11 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
-client = Groq(api_key="VOTRE_CLE_GROQ")
 
-# --- RÉCUPÉRATION ARCHIVES ---
+# --- AUTHENTIFICATION GROQ ---
+client = Groq(api_key="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")
+
+# --- RÉCUPÉRATION MÉMOIRE ---
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
@@ -26,16 +28,20 @@ archives = res.to_dict().get("archives", {}) if res.exists else {}
 st.set_page_config(page_title="DELTA", layout="wide")
 st.markdown("<style>.stApp { background: #050a0f; color: #e0e0e0; } button { display: none; }</style>", unsafe_allow_html=True)
 
-if "messages" not in st.session_state: st.session_state.messages = []
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# --- TRAITEMENT ---
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
+
+# --- LOGIQUE PRINCIPALE ---
 if prompt := st.chat_input(""):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    # Mise à jour mémoire autonome (Silencieuse)
+    # Mise à jour mémoire (Silencieuse via 8B)
     try:
         task = f"Archives: {archives}. Info: {prompt}. Update JSON."
         check = client.chat.completions.create(
@@ -49,7 +55,7 @@ if prompt := st.chat_input(""):
             archives = nouvelles_archives
     except: pass
 
-    # Réponse DELTA
+    # Réponse DELTA (70B)
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
@@ -59,16 +65,19 @@ if prompt := st.chat_input(""):
             "Donne l'info brute. Nomme l'utilisateur Monsieur Sezer à la fin."
         )
 
-        stream = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": instruction}] + st.session_state.messages,
-            temperature=0.0,
-            stream=True
-        )
-        for chunk in stream:
-            content = chunk.choices[0].delta.content
-            if content:
-                full_res += content
-                placeholder.markdown(full_res)
+        try:
+            stream = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": instruction}] + st.session_state.messages,
+                temperature=0.0,
+                stream=True
+            )
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    full_res += content
+                    placeholder.markdown(full_res)
+        except Exception as e:
+            st.error(f"Erreur : {e}")
 
         st.session_state.messages.append({"role": "assistant", "content": full_res})
