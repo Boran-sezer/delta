@@ -24,8 +24,8 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA AI - Haute Précision", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : ARCHIVAGE CRITIQUE</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA AI - R1", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : DEEP REASONING</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -34,50 +34,50 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Transmettez vos données, Monsieur Sezer..."):
+if prompt := st.chat_input("Ordres, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # --- ANALYSEUR HAUTE PERFORMANCE (INVISIBLE) ---
+    # --- ANALYSEUR PAR RAISONNEMENT (DEEPSEEK R1) ---
+    # Ce modèle va littéralement "réfléchir" à l'importance de l'info
     sys_analyse = (
-        f"Tu es le centre de données de Monsieur Sezer. Mémoire actuelle : {archives}. "
-        f"Dernier message : '{prompt}'. "
-        "MISSION : Identifie CHAQUE information cruciale (technique, personnelle, projet, préférence). "
-        "Ne jette rien d'important. Reformule pour que ce soit clair et professionnel. "
-        "Réorganise les sections si nécessaire. "
-        "Réponds EXCLUSIVEMENT avec l'objet JSON complet mis à jour. "
-        "Si absolument rien de nouveau ou d'utile n'est détecté, réponds : IGNORE."
+        f"Tu es l'unité de raisonnement logique de Monsieur Sezer. Mémoire actuelle : {archives}. "
+        f"Dernière interaction : '{prompt}'. "
+        "MISSION : Analyse si ce message contient une information structurelle, technique ou personnelle vitale. "
+        "Si oui, réorganise l'entièreté du JSON pour qu'il soit optimal. Supprime l'inutile, fusionne les doublons. "
+        "Réponds EXCLUSIVEMENT avec le JSON complet. Si rien ne justifie une modification, réponds : IGNORE."
     )
     
     try:
-        # Utilisation du modèle 70B pour l'analyse de mémoire
+        # Utilisation de DeepSeek-R1 pour une analyse ultra-logique
         check = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", 
-            messages=[{"role": "system", "content": "Tu es un expert en gestion de données stratégiques."}, {"role": "user", "content": sys_analyse}],
-            temperature=0
+            model="deepseek-r1-distill-llama-70b", 
+            messages=[{"role": "system", "content": "Tu es un moteur d'analyse logique de haut niveau."}, {"role": "user", "content": sys_analyse}],
+            temperature=0.1 # Basse température pour une précision maximale
         )
         verdict = check.choices[0].message.content.strip()
         
-        if verdict != "IGNORE":
-            match = re.search(r'\{.*\}', verdict, re.DOTALL)
-            if match:
-                nouvelles_archives = json.loads(match.group(0))
-                if nouvelles_archives != archives:
-                    archives = nouvelles_archives
-                    doc_ref.set({"archives": archives})
-                    st.toast("⚙️ Données critiques archivées")
+        # On extrait le JSON (DeepSeek peut inclure sa 'pensée' entre des balises <think>)
+        json_match = re.search(r'\{.*\}', verdict, re.DOTALL)
+        if json_match:
+            nouvelles_archives = json.loads(json_match.group(0))
+            if nouvelles_archives != archives:
+                archives = nouvelles_archives
+                doc_ref.set({"archives": archives})
+                st.toast("🧠 Raisonnement appliqué : Mémoire restructurée")
     except: pass
 
     # --- 5. RÉPONSE DE DELTA ---
     with st.chat_message("assistant"):
         instruction_delta = (
-            f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
-            f"Données mémorisées : {archives}. "
-            "Sois ultra-précis, technique et efficace. Utilise les archives pour chaque réponse."
+            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. "
+            f"Archives : {archives}. "
+            "Sois percutant, froid, technique et extrêmement efficace."
         )
         placeholder = st.empty()
         full_response = ""
         try:
+            # On reste sur Llama 3.3 pour la rapidité de conversation
             stream = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
                 messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
@@ -88,5 +88,5 @@ if prompt := st.chat_input("Transmettez vos données, Monsieur Sezer..."):
                     full_response += chunk.choices[0].delta.content
                     placeholder.markdown(full_response + "▌")
             placeholder.markdown(full_response)
-        except: placeholder.markdown("Erreur.")
+        except: placeholder.markdown("Liaison interrompue.")
         st.session_state.messages.append({"role": "assistant", "content": full_response})
