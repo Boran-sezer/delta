@@ -12,91 +12,73 @@ if not firebase_admin._apps:
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
-    except Exception as e:
-        st.error(f"Erreur Firebase: {e}")
+    except: pass
 
 db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
-
-# --- AUTHENTIFICATION GROQ ---
 client = Groq(api_key="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")
 
-# --- RÉCUPÉRATION MÉMOIRE STABLE ---
-def get_memory():
-    try:
-        res = doc_ref.get()
-        return res.to_dict().get("archives", {}) if res.exists else {}
-    except:
-        return {}
+# --- RÉCUPÉRATION MÉMOIRE ---
+res = doc_ref.get()
+archives = res.to_dict().get("archives", {}) if res.exists else {}
 
-archives = get_memory()
-
-# --- INTERFACE SOBRE ---
+# --- INTERFACE ---
 st.set_page_config(page_title="DELTA", layout="wide")
 st.markdown("""
     <style>
     .stApp { background: #ffffff; color: #1a1a1a; }
     .stChatMessage { background-color: #f7f7f8; border-radius: 10px; border: 1px solid #e5e5e5; }
     button { display: none; }
-    .title-delta { font-weight: 800; font-size: 2.5rem; text-align: center; color: #1a1a1a; }
+    .title-delta { font-weight: 800; font-size: 2.8rem; text-align: center; color: #000; letter-spacing: -2px; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="title-delta">DELTA</h1>', unsafe_allow_html=True)
 st.divider()
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
+if "messages" not in st.session_state: st.session_state.messages = []
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- LOGIQUE DE TRAITEMENT ---
+# --- TRAITEMENT ---
 if prompt := st.chat_input(""):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
 
-    # Mise à jour mémoire (Logique Youtubeur : Silencieuse et robuste)
-    try:
-        update_prompt = f"Tu es un module de mémoire. Analyse: {prompt}. Archives actuelles: {archives}. Réponds uniquement en JSON formaté."
-        memory_check = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "system", "content": "Update memory JSON."}, {"role": "user", "content": update_prompt}],
-            response_format={"type": "json_object"}
-        )
-        new_data = json.loads(memory_check.choices[0].message.content)
-        if new_data:
-            doc_ref.set({"archives": new_data}, merge=True)
-            archives = new_data
-    except:
-        pass # Évite de bloquer la réponse en cas d'erreur de mémoire
+    # Mise à jour mémoire (Inspiration Lux, filtrage DELTA)
+    if len(prompt.split()) > 2:
+        try:
+            m_prompt = f"Archives: {archives}. Message: {prompt}. Update JSON memory if info is relevant."
+            check = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "system", "content": "You are a JSON database manager. No prose."}, {"role": "user", "content": m_prompt}],
+                response_format={"type": "json_object"}
+            )
+            archives = json.loads(check.choices[0].message.content)
+            doc_ref.set({"archives": archives}, merge=True)
+        except: pass
 
     # Réponse DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
+        mem_info = f"Mémoire: {json.dumps(archives)}" if archives else "Néant."
         
         system_instruction = (
-            f"Tu es DELTA. Créateur: Monsieur Sezer. Contexte: {archives}. "
-            "Réponse ultra-courte. Pas de politesse. Info brute. "
+            f"Tu es DELTA. Créateur: Monsieur Sezer. {mem_info}. "
+            "RÈGLE: Réponse courte, sans politesse, sans mentionner ta mémoire. "
             "Termine par 'Monsieur Sezer'."
         )
 
-        try:
-            stream = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": system_instruction}] + st.session_state.messages,
-                temperature=0.2,
-                stream=True
-            )
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    full_res += chunk.choices[0].delta.content
-                    placeholder.markdown(full_res + "▌")
-            placeholder.markdown(full_res)
-        except Exception as e:
-            st.error("Erreur de connexion au cerveau DELTA.")
-
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": system_instruction}] + st.session_state.messages[-6:],
+            temperature=0.4,
+            stream=True
+        )
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                full_res += chunk.choices[0].delta.content
+                placeholder.markdown(full_res + "▌")
+        placeholder.markdown(full_res)
         st.session_state.messages.append({"role": "assistant", "content": full_res})
