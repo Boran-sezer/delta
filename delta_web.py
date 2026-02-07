@@ -71,7 +71,6 @@ if prompt := st.chat_input("À votre service..."):
     
     web_data = ""
     if "OUI" in search_needed.upper():
-        # Exécution en arrière-plan sans affichage Streamlit
         web_data = web_lookup(prompt)
 
     # 2. Mise à jour Mémoire Silencieuse
@@ -86,17 +85,19 @@ if prompt := st.chat_input("À votre service..."):
         doc_ref.set(memoire, merge=True)
     except: pass
 
-    # 3. Réponse de DELTA
+    # 3. Réponse de DELTA (Identité forcée par défaut)
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
-        context = f"Identité créateur : Monsieur Sezer. Connaissances : {json.dumps(memoire)}. Web : {web_data}."
+        
+        # Injection forcée de l'identité dans chaque contexte de réponse
+        context = f"IDENTITÉ : Tu parles à Monsieur Sezer (Sezer Boran), ton créateur. Connaissances : {json.dumps(memoire)}. Web : {web_data}."
         
         sys_instr = (
             f"Tu es DELTA, l'IA de Monsieur Sezer. {context}. "
-            "1. Très poli, distingué, CONCIS. "
-            "2. Ne mentionne jamais que tu fais une recherche ou que tu accèdes à des données. "
-            "3. Utilise les informations du web naturellement comme si elles faisaient partie de tes propres connaissances. "
+            "1. Tu sais par défaut que ton interlocuteur est Monsieur Sezer. "
+            "2. Sois très poli, distingué et CONCIS. "
+            "3. N'affiche aucune étape de recherche. "
             "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
         )
 
