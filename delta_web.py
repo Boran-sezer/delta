@@ -24,8 +24,8 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA AI - Mise à jour", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : MOTEUR QWEN-R1</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA AI - Stabilité", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : MOTEUR LLAMA 3.3 STABLE</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -38,42 +38,41 @@ if prompt := st.chat_input("Ordres, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # --- ANALYSEUR DE MÉMOIRE (DEEPSEEK QWEN 32B) ---
+    # --- ANALYSEUR DE MÉMOIRE (MODÈLE STABLE 70B) ---
     sys_analyse = (
-        f"Tu es le cerveau de Monsieur Sezer Boran. Mémoire actuelle : {archives}. "
-        f"Dernière interaction : '{prompt}'. "
-        "Analyse l'importance. Si l'info est capitale, réorganise le JSON. "
-        "Réponds UNIQUEMENT avec le JSON complet. Ne parle pas."
+        f"Tu es l'intelligence de gestion de données de Monsieur Sezer Boran. Mémoire actuelle : {archives}. "
+        f"Dernier message : '{prompt}'. "
+        "Analyse si une information doit être apprise, modifiée ou supprimée. "
+        "Réponds EXCLUSIVEMENT avec l'objet JSON complet des archives mis à jour. "
+        "Ne donne aucune explication technique, juste le JSON."
     )
     
     try:
-        # Passage sur le modèle Qwen Distill (Actif et supporté)
+        # Utilisation du modèle 70B Versatile (Le plus stable sur Groq)
         check = client.chat.completions.create(
-            model="deepseek-r1-distill-qwen-32b", 
-            messages=[{"role": "system", "content": "Expert JSON Reasoning."}, {"role": "user", "content": sys_analyse}],
-            temperature=0.1
+            model="llama-3.3-70b-versatile", 
+            messages=[{"role": "system", "content": "Tu es un moteur de base de données JSON."}, {"role": "user", "content": sys_analyse}],
+            temperature=0,
+            response_format={"type": "json_object"} # Force le format JSON
         )
         verdict = check.choices[0].message.content
         
-        # Nettoyage des balises de pensée (pensée interne du modèle R1)
-        nettoye = re.sub(r'<think>.*?</think>', '', verdict, flags=re.DOTALL)
-        json_match = re.search(r'\{.*\}', nettoye, re.DOTALL)
-        
+        json_match = re.search(r'\{.*\}', verdict, re.DOTALL)
         if json_match:
             nouvelles_archives = json.loads(json_match.group(0))
             if nouvelles_archives != archives:
                 doc_ref.set({"archives": nouvelles_archives})
                 archives = nouvelles_archives
-                st.toast("💾 Firebase : Données sécurisées")
+                st.toast("💾 Firebase : Mémoire synchronisée")
     except Exception as e:
-        st.error(f"Erreur technique (Groq) : {e}")
+        st.error(f"Erreur système : {e}")
 
     # --- 5. RÉPONSE DE DELTA ---
     with st.chat_message("assistant"):
         instruction_delta = (
             f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. "
-            f"Archives Firebase : {archives}. "
-            "Réponse technique, brève, efficace."
+            f"Données Firebase : {archives}. "
+            "Réponse technique, percutante et brève."
         )
         placeholder = st.empty()
         full_response = ""
@@ -88,5 +87,5 @@ if prompt := st.chat_input("Ordres, Monsieur Sezer..."):
                     full_response += chunk.choices[0].delta.content
                     placeholder.markdown(full_response + "▌")
             placeholder.markdown(full_response)
-        except: placeholder.markdown("Liaison perdue.")
+        except: placeholder.markdown("Liaison interrompue.")
         st.session_state.messages.append({"role": "assistant", "content": full_response})
